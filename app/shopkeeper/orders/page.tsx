@@ -1,0 +1,923 @@
+"use client";
+
+import { useEffect, useMemo, useState } from "react";
+import { createClient } from "@/lib/supabase/client";
+
+type ShopkeeperOrder = {
+  order_id: string;
+  token_code: string;
+  cafe_id: string;
+  status: string;
+  total_amount: number;
+  advance_paid: number;
+  remaining_due: number;
+  created_at: string;
+
+  advance_payment_id?: string | null;
+  advance_payment_status?: string | null;
+  advance_payment_method?: string | null;
+  advance_transaction_id?: string | null;
+
+  remaining_transaction_id?: string | null;
+  remaining_payment_method?: string | null;
+};
+
+const supabase = createClient();
+
+function formatTime(seconds: number) {
+  const safeSeconds = Math.max(seconds, 0);
+
+  const minutes = Math.floor(safeSeconds / 60);
+
+  const remainingSeconds = safeSeconds % 60;
+
+  return `${String(minutes).padStart(2, "0")}:${String(
+    remainingSeconds
+  ).padStart(2, "0")}`;
+}
+
+function formatPaymentMethod(method?: string | null) {
+  if (!method) {
+    return "Not available";
+  }
+
+  if (method === "bkash") {
+    return "bKash";
+  }
+
+  if (method === "nagad") {
+    return "Nagad";
+  }
+
+  if (method === "cash") {
+    return "Cash";
+  }
+
+  return method;
+}
+
+function formatPaymentStatus(status?: string | null) {
+  if (!status) {
+    return "Not available";
+  }
+
+  if (status === "paid") {
+    return "Paid";
+  }
+
+  if (status === "submitted") {
+    return "Verification Pending";
+  }
+
+  if (status === "refunded") {
+    return "Refunded";
+  }
+
+  if (status === "refund_pending") {
+    return "Refund Pending";
+  }
+
+  if (status === "unpaid") {
+    return "Unpaid";
+  }
+
+  return status;
+}
+
+export default function ShopkeeperOrdersPage() {
+  const [orders, setOrders] = useState<ShopkeeperOrder[]>([]);
+
+  const [loading, setLoading] = useState(true);
+
+  const [error, setError] = useState("");
+
+  const [message, setMessage] = useState("");
+
+  const [search, setSearch] = useState("");
+
+  const [paymentMethod, setPaymentMethod] = useState<
+    Record<string, string>
+  >({});
+
+  const [transactionId, setTransactionId] = useState<
+    Record<string, string>
+  >({});
+
+  const [workingId, setWorkingId] = useState<string | null>(null);
+
+  const [now, setNow] = useState(Date.now());
+
+  async function loadOrders() {
+    setLoading(true);
+    setError("");
+
+    const { data, error } = await supabase.rpc(
+      "get_shopkeeper_order_payment_data"
+    );
+
+    if (error) {
+      setError(error.message);
+      setOrders([]);
+    } else {
+      setOrders(data || []);
+    }
+
+    setLoading(false);
+  }
+
+  useEffect(() => {
+    loadOrders();
+
+    const timer = window.setInterval(() => {
+      setNow(Date.now());
+    }, 1000);
+
+    return () => {
+      window.clearInterval(timer);
+    };
+  }, []);
+
+  const filteredOrders = useMemo(() => {
+    const query = search.trim().toLowerCase();
+
+    if (!query) {
+      return orders;
+    }
+
+    return orders.filter((order) => {
+      return (
+        order.token_code?.toLowerCase().includes(query) ||
+        order.order_id?.toLowerCase().includes(query) ||
+        order.advance_transaction_id
+          ?.toLowerCase()
+          .includes(query) ||
+        order.remaining_transaction_id
+          ?.toLowerCase()
+          .includes(query)
+      );
+    });
+  }, [orders, search]);
+
+  function getDeadline(order: ShopkeeperOrder) {
+    return new Date(order.created_at).getTime() + 5 * 60 * 1000;
+  }
+
+  function isInstantOrder(order: ShopkeeperOrder) {
+    return (
+      Number(order.advance_paid) >=
+      Number(order.total_amount) - 0.01
+    );
+  }
+
+  function cancellationSeconds(order: ShopkeeperOrder) {
+    if (isInstantOrder(order)) {
+      return 0;
+    }
+
+    if (order.status === "cancelled") {
+      return 0;
+    }
+
+    const remaining = Math.ceil(
+      (getDeadline(order) - now) / 1000
+    );
+
+    return Math.max(remaining, 0);
+  }
+
+  function canPrepare(order: ShopkeeperOrder) {
+    return (
+      isInstantOrder(order) ||
+      cancellationSeconds(order) === 0
+    );
+  }
+
+  async function verifyPayment(orderId: string) {
+    const order = orders.find(
+      (item) => item.order_id === orderId
+    );
+
+    if (!order?.advance_payment_id) {
+      return;
+    }
+
+    const confirmVerify = window.confirm(
+      `Token ${order.token_code}-এর payment verify করবেন?`
+    );
+
+    if (!confirmVerify) {
+      return;
+    }
+
+    setWorkingId(orderId);
+    setError("");
+    setMessage("");
+
+    const { error } = await supabase.rpc(
+      "verify_advance_payment",
+      {
+        p_payment_id: order.advance_payment_id,
+      }
+    );
+
+    if (error) {
+      setError(error.message);
+    } else {
+      setMessage(
+        `Token ${order.token_code}-এর payment successfully verified.`
+      );
+
+      await loadOrders();
+    }
+
+    setWorkingId(null);
+  }
+
+  async function startPreparing(order: ShopkeeperOrder) {
+    const allowed = canPrepare(order);
+
+    if (!allowed) {
+      setError(
+        "৫ মিনিট শেষ না হওয়া পর্যন্ত এই order-এর খাবার তৈরি করা যাবে না।"
+      );
+      return;
+    }
+
+    const confirmStart = window.confirm(
+      `Token ${order.token_code}-এর খাবার তৈরি শুরু করবেন?`
+    );
+
+    if (!confirmStart) {
+      return;
+    }
+
+    setWorkingId(order.order_id);
+    setError("");
+    setMessage("");
+
+    const { error } = await supabase.rpc(
+      "prepare_instant_order",
+      {
+        p_order_id: order.order_id,
+      }
+    );
+
+    if (error) {
+      setError(error.message);
+    } else {
+      setMessage(
+        `Token ${order.token_code} এখন preparing status-এ আছে।`
+      );
+
+      await loadOrders();
+    }
+
+    setWorkingId(null);
+  }
+
+  async function markReady(orderId: string) {
+    setWorkingId(orderId);
+    setError("");
+    setMessage("");
+
+    const { error } = await supabase.rpc(
+      "update_shopkeeper_order_status",
+      {
+        p_order_id: orderId,
+        p_new_status: "ready",
+      }
+    );
+
+    if (error) {
+      setError(error.message);
+    } else {
+      setMessage("Order successfully marked as ready.");
+
+      await loadOrders();
+    }
+
+    setWorkingId(null);
+  }
+
+  async function payRemaining(order: ShopkeeperOrder) {
+    const method = paymentMethod[order.order_id];
+
+    const txId =
+      transactionId[order.order_id]?.trim() || null;
+
+    if (!method) {
+      setError("Please select a remaining payment method.");
+      return;
+    }
+
+    if (
+      (method === "bkash" || method === "nagad") &&
+      !txId
+    ) {
+      setError(
+        "bKash বা Nagad হলে transaction ID দিতে হবে."
+      );
+      return;
+    }
+
+    const confirmPayment = window.confirm(
+      `৳${Number(order.remaining_due).toFixed(
+        2
+      )} remaining payment paid হিসেবে record করবেন?`
+    );
+
+    if (!confirmPayment) {
+      return;
+    }
+
+    setWorkingId(order.order_id);
+    setError("");
+    setMessage("");
+
+    const { error } = await supabase.rpc(
+      "mark_remaining_payment_paid",
+      {
+        p_order_id: order.order_id,
+        p_payment_method: method,
+        p_transaction_id: txId,
+      }
+    );
+
+    if (error) {
+      setError(error.message);
+    } else {
+      setMessage(
+        `Token ${order.token_code}-এর remaining payment recorded.`
+      );
+
+      setPaymentMethod((prev) => ({
+        ...prev,
+        [order.order_id]: "",
+      }));
+
+      setTransactionId((prev) => ({
+        ...prev,
+        [order.order_id]: "",
+      }));
+
+      await loadOrders();
+    }
+
+    setWorkingId(null);
+  }
+
+  async function collectOrder(orderId: string) {
+    const confirmCollect = window.confirm(
+      "আপনি কি এই order collected হিসেবে mark করতে চান?"
+    );
+
+    if (!confirmCollect) {
+      return;
+    }
+
+    setWorkingId(orderId);
+    setError("");
+    setMessage("");
+
+    const { error } = await supabase.rpc(
+      "collect_order",
+      {
+        p_order_id: orderId,
+      }
+    );
+
+    if (error) {
+      setError(error.message);
+    } else {
+      setMessage("Order successfully collected.");
+
+      await loadOrders();
+    }
+
+    setWorkingId(null);
+  }
+
+  const confirmedCount = orders.filter(
+    (order) => order.status === "confirmed"
+  ).length;
+
+  const preparingCount = orders.filter(
+    (order) => order.status === "preparing"
+  ).length;
+
+  const readyCount = orders.filter(
+    (order) => order.status === "ready"
+  ).length;
+
+  return (
+    <main className="min-h-screen bg-slate-50 px-6 py-10">
+      <div className="mx-auto max-w-6xl">
+        <div className="mb-8 flex flex-col justify-between gap-5 md:flex-row md:items-end">
+          <div>
+            <p className="text-sm font-semibold uppercase tracking-wider text-emerald-600">
+              SHOPKEEPER
+            </p>
+
+            <h1 className="mt-2 text-3xl font-bold text-slate-900">
+              Order Management
+            </h1>
+
+            <p className="mt-2 text-slate-600">
+              Active orders, payment status এবং preparation
+              window এখান থেকে manage করুন।
+            </p>
+          </div>
+
+          <div className="flex gap-2">
+            <button
+              onClick={loadOrders}
+              className="rounded-xl border border-slate-300 px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+            >
+              Refresh
+            </button>
+
+            <button
+              onClick={() =>
+                (window.location.href = "/shopkeeper")
+              }
+              className="rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-emerald-700"
+            >
+              Dashboard
+            </button>
+          </div>
+        </div>
+
+        <section className="mb-6 grid gap-4 sm:grid-cols-3">
+          <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+            <p className="text-sm text-slate-500">
+              Confirmed
+            </p>
+
+            <p className="mt-2 text-3xl font-black text-blue-600">
+              {confirmedCount}
+            </p>
+          </div>
+
+          <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+            <p className="text-sm text-slate-500">
+              Preparing
+            </p>
+
+            <p className="mt-2 text-3xl font-black text-indigo-600">
+              {preparingCount}
+            </p>
+          </div>
+
+          <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+            <p className="text-sm text-slate-500">
+              Ready
+            </p>
+
+            <p className="mt-2 text-3xl font-black text-emerald-600">
+              {readyCount}
+            </p>
+          </div>
+        </section>
+
+        <div className="mb-6 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+          <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
+            <div className="w-full">
+              <label
+                htmlFor="orderSearch"
+                className="mb-2 block text-sm font-bold text-slate-700"
+              >
+                Search Order
+              </label>
+
+              <input
+                id="orderSearch"
+                type="text"
+                value={search}
+                onChange={(event) =>
+                  setSearch(event.target.value)
+                }
+                placeholder="Token code বা Advance / Remaining Transaction ID দিয়ে search করুন"
+                className="w-full rounded-xl border border-slate-300 px-4 py-3 text-sm outline-none focus:border-emerald-500 focus:ring-4 focus:ring-emerald-100"
+              />
+            </div>
+
+            {search.trim() && (
+              <button
+                type="button"
+                onClick={() => setSearch("")}
+                className="rounded-xl border border-slate-300 px-4 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+              >
+                Clear
+              </button>
+            )}
+          </div>
+
+          <p className="mt-3 text-sm text-slate-500">
+            Showing {filteredOrders.length} of {orders.length} orders
+          </p>
+        </div>
+
+        {message && (
+          <div className="mb-6 rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-emerald-700">
+            {message}
+          </div>
+        )}
+
+        {error && (
+          <div className="mb-6 rounded-xl border border-red-200 bg-red-50 p-4 text-red-700">
+            {error}
+          </div>
+        )}
+
+        {loading ? (
+          <div className="rounded-2xl bg-white p-8 shadow-sm">
+            Loading orders...
+          </div>
+        ) : filteredOrders.length === 0 ? (
+          <div className="rounded-2xl bg-white p-8 text-center shadow-sm">
+            <h2 className="text-xl font-semibold">
+              No orders found
+            </h2>
+
+            <p className="mt-2 text-slate-500">
+              Search বা current filter অনুযায়ী কোনো order নেই।
+            </p>
+          </div>
+        ) : (
+          <div className="space-y-5">
+            {filteredOrders.map((order) => {
+              const instant = isInstantOrder(order);
+
+              const remainingSeconds =
+                cancellationSeconds(order);
+
+              const preparationAllowed =
+                canPrepare(order);
+
+              const hasAdvancePayment =
+                Boolean(
+                  order.advance_payment_method ||
+                    order.advance_transaction_id ||
+                    order.advance_payment_status
+                );
+
+              const hasRemainingPayment =
+                Boolean(
+                  order.remaining_payment_method ||
+                    order.remaining_transaction_id
+                );
+
+              return (
+                <div
+                  key={order.order_id}
+                  className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm"
+                >
+                  <div className="grid gap-4 md:grid-cols-5">
+                    <div>
+                      <p className="text-sm text-slate-500">
+                        Token
+                      </p>
+
+                      <p className="mt-1 text-xl font-bold">
+                        {order.token_code}
+                      </p>
+                    </div>
+
+                    <div>
+                      <p className="text-sm text-slate-500">
+                        Status
+                      </p>
+
+                      <p className="mt-1 font-bold uppercase text-emerald-600">
+                        {order.status}
+                      </p>
+                    </div>
+
+                    <div>
+                      <p className="text-sm text-slate-500">
+                        Total
+                      </p>
+
+                      <p className="mt-1 font-semibold">
+                        ৳{Number(order.total_amount).toFixed(2)}
+                      </p>
+                    </div>
+
+                    <div>
+                      <p className="text-sm text-slate-500">
+                        Advance Paid
+                      </p>
+
+                      <p className="mt-1 font-bold text-emerald-600">
+                        ৳{Number(order.advance_paid).toFixed(2)}
+                      </p>
+                    </div>
+
+                    <div>
+                      <p className="text-sm text-slate-500">
+                        Remaining
+                      </p>
+
+                      <p className="mt-1 font-bold text-orange-600">
+                        ৳{Number(order.remaining_due).toFixed(2)}
+                      </p>
+                    </div>
+                  </div>
+
+                  {order.status === "payment_pending" &&
+                    order.advance_payment_status ===
+                      "submitted" && (
+                      <div className="mt-6 rounded-2xl border border-blue-200 bg-blue-50 p-5">
+                        <p className="font-bold text-blue-800">
+                          Payment Verification Pending
+                        </p>
+
+                        <p className="mt-2 text-sm text-blue-700">
+                          Method:{" "}
+                          {formatPaymentMethod(
+                            order.advance_payment_method
+                          )}
+                        </p>
+
+                        <p className="mt-1 text-sm text-blue-700">
+                          TrxID:{" "}
+                          {order.advance_transaction_id ||
+                            "Not available"}
+                        </p>
+
+                        <button
+                          onClick={() =>
+                            verifyPayment(order.order_id)
+                          }
+                          disabled={
+                            workingId === order.order_id
+                          }
+                          className="mt-4 rounded-xl bg-blue-600 px-5 py-3 text-sm font-bold text-white hover:bg-blue-700 disabled:opacity-60"
+                        >
+                          {workingId === order.order_id
+                            ? "Verifying..."
+                            : "Verify Payment"}
+                        </button>
+                      </div>
+                    )}
+
+                  {!instant &&
+                    order.status === "confirmed" &&
+                    remainingSeconds > 0 && (
+                      <div className="mt-6 rounded-2xl border border-red-200 bg-red-50 p-5">
+                        <p className="font-bold text-red-700">
+                          ⚠️ ৫ মিনিটের আগে খাবার তৈরি করবেন না।
+                        </p>
+
+                        <p className="mt-1 text-sm text-red-600">
+                          অর্ডারটি এই সময়ের মধ্যে বাতিল হতে পারে।
+                        </p>
+
+                        <p className="mt-3 text-3xl font-black text-red-600">
+                          {formatTime(remainingSeconds)}
+                        </p>
+                      </div>
+                    )}
+
+                  {!instant &&
+                    order.status === "confirmed" &&
+                    remainingSeconds === 0 && (
+                      <div className="mt-6 rounded-2xl border border-emerald-200 bg-emerald-50 p-5">
+                        <p className="font-bold text-emerald-700">
+                          ✅ এখন খাবার তৈরি করতে পারেন।
+                        </p>
+                      </div>
+                    )}
+
+                  {instant && order.status === "confirmed" && (
+                    <div className="mt-6 rounded-2xl border border-blue-200 bg-blue-50 p-5">
+                      <p className="font-bold text-blue-700">
+                        ⚡ Instant Buy — এখনই খাবার তৈরি করতে পারেন।
+                      </p>
+                    </div>
+                  )}
+
+                  <div className="mt-6 flex flex-wrap gap-3">
+                    {order.status === "confirmed" && (
+                      <button
+                        onClick={() =>
+                          startPreparing(order)
+                        }
+                        disabled={
+                          workingId === order.order_id ||
+                          !preparationAllowed
+                        }
+                        className="rounded-xl bg-blue-600 px-4 py-2 font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-40"
+                      >
+                        {!preparationAllowed
+                          ? `Wait ${formatTime(
+                              remainingSeconds
+                            )}`
+                          : "Start Preparing"}
+                      </button>
+                    )}
+
+                    {order.status === "preparing" && (
+                      <button
+                        onClick={() =>
+                          markReady(order.order_id)
+                        }
+                        disabled={
+                          workingId === order.order_id
+                        }
+                        className="rounded-xl bg-emerald-600 px-4 py-2 font-semibold text-white hover:bg-emerald-700 disabled:opacity-60"
+                      >
+                        Mark Ready
+                      </button>
+                    )}
+
+                    {order.status === "ready" &&
+                      Number(order.remaining_due) > 0 && (
+                        <div className="flex flex-col gap-3 rounded-xl bg-slate-50 p-4 md:flex-row md:items-center">
+                          <select
+                            value={
+                              paymentMethod[
+                                order.order_id
+                              ] || ""
+                            }
+                            onChange={(event) =>
+                              setPaymentMethod((prev) => ({
+                                ...prev,
+                                [order.order_id]:
+                                  event.target.value,
+                              }))
+                            }
+                            className="rounded-xl border border-slate-300 bg-white px-4 py-2"
+                          >
+                            <option value="">
+                              Select payment method
+                            </option>
+
+                            <option value="cash">
+                              Cash
+                            </option>
+
+                            <option value="bkash">
+                              bKash
+                            </option>
+
+                            <option value="nagad">
+                              Nagad
+                            </option>
+                          </select>
+
+                          <input
+                            type="text"
+                            placeholder="Transaction ID (bKash/Nagad)"
+                            value={
+                              transactionId[
+                                order.order_id
+                              ] || ""
+                            }
+                            onChange={(event) =>
+                              setTransactionId((prev) => ({
+                                ...prev,
+                                [order.order_id]:
+                                  event.target.value,
+                              }))
+                            }
+                            className="rounded-xl border border-slate-300 px-4 py-2"
+                          />
+
+                          <button
+                            onClick={() =>
+                              payRemaining(order)
+                            }
+                            disabled={
+                              workingId === order.order_id
+                            }
+                            className="rounded-xl bg-orange-600 px-4 py-2 font-semibold text-white hover:bg-orange-700 disabled:opacity-60"
+                          >
+                            Mark Remaining Paid
+                          </button>
+                        </div>
+                      )}
+
+                    {order.status === "ready" &&
+                      Number(order.remaining_due) === 0 && (
+                        <button
+                          onClick={() =>
+                            collectOrder(order.order_id)
+                          }
+                          disabled={
+                            workingId === order.order_id
+                          }
+                          className="rounded-xl bg-purple-600 px-4 py-2 font-semibold text-white hover:bg-purple-700 disabled:opacity-60"
+                        >
+                          Mark Collected
+                        </button>
+                      )}
+                  </div>
+
+                  {(hasAdvancePayment ||
+                    hasRemainingPayment) && (
+                    <div className="mt-6 border-t border-slate-100 pt-5">
+                      <p className="text-sm font-bold text-slate-700">
+                        Payment History
+                      </p>
+
+                      <div className="mt-4 grid gap-4 md:grid-cols-2">
+                        {hasAdvancePayment && (
+                          <div className="rounded-2xl border border-blue-200 bg-blue-50 p-4">
+                            <p className="text-sm font-bold uppercase tracking-wide text-blue-700">
+                              Advance Payment
+                            </p>
+
+                            <div className="mt-3 space-y-2 text-sm">
+                              <div className="flex justify-between gap-4">
+                                <span className="text-slate-500">
+                                  Status
+                                </span>
+
+                                <span className="font-semibold text-slate-800">
+                                  {formatPaymentStatus(
+                                    order.advance_payment_status
+                                  )}
+                                </span>
+                              </div>
+
+                              <div className="flex justify-between gap-4">
+                                <span className="text-slate-500">
+                                  Method
+                                </span>
+
+                                <span className="font-semibold text-slate-800">
+                                  {formatPaymentMethod(
+                                    order.advance_payment_method
+                                  )}
+                                </span>
+                              </div>
+
+                              <div className="flex flex-col gap-1">
+                                <span className="text-slate-500">
+                                  Transaction ID
+                                </span>
+
+                                <span className="break-all font-semibold text-slate-800">
+                                  {order.advance_transaction_id ||
+                                    "Not available"}
+                                </span>
+                              </div>
+                            </div>
+                          </div>
+                        )}
+
+                        {hasRemainingPayment && (
+                          <div className="rounded-2xl border border-orange-200 bg-orange-50 p-4">
+                            <p className="text-sm font-bold uppercase tracking-wide text-orange-700">
+                              Remaining Payment
+                            </p>
+
+                            <div className="mt-3 space-y-2 text-sm">
+                              <div className="flex justify-between gap-4">
+                                <span className="text-slate-500">
+                                  Status
+                                </span>
+
+                                <span className="font-semibold text-slate-800">
+                                  Paid
+                                </span>
+                              </div>
+
+                              <div className="flex justify-between gap-4">
+                                <span className="text-slate-500">
+                                  Method
+                                </span>
+
+                                <span className="font-semibold text-slate-800">
+                                  {formatPaymentMethod(
+                                    order.remaining_payment_method
+                                  )}
+                                </span>
+                              </div>
+
+                              <div className="flex flex-col gap-1">
+                                <span className="text-slate-500">
+                                  Transaction ID
+                                </span>
+
+                                <span className="break-all font-semibold text-slate-800">
+                                  {order.remaining_transaction_id ||
+                                    "Not applicable — Cash payment"}
+                                </span>
+                              </div>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    </main>
+  );
+}
