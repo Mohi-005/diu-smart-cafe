@@ -65,17 +65,12 @@ export default async function PaymentPage({
   } = await supabase.auth.getUser();
 
   if (!user) {
-    const redirectPath =
-      `/payment?order=${encodeURIComponent(orderId)}`;
+    const redirectPath = `/payment?order=${encodeURIComponent(orderId)}`;
 
     redirect(
       `/login?redirect=${encodeURIComponent(redirectPath)}`
     );
   }
-
-  /* ---------------------------------------------------------
-     Get student's own order
-  --------------------------------------------------------- */
 
   const { data: order, error: orderError } = await supabase
     .from("orders")
@@ -88,7 +83,8 @@ export default async function PaymentPage({
       cancellation_deadline_at,
       student_id,
       cafes (
-        name
+        name,
+        bkash_number
       )
       `
     )
@@ -96,30 +92,32 @@ export default async function PaymentPage({
     .eq("student_id", user.id)
     .maybeSingle();
 
-  /* ---------------------------------------------------------
-     Get advance payment
-  --------------------------------------------------------- */
+  const { data: payment, error: paymentError } =
+    await supabase
+      .from("payments")
+      .select(
+        `
+        id,
+        order_id,
+        student_id,
+        payment_stage,
+        amount,
+        status,
+        payment_method,
+        transaction_id
+        `
+      )
+      .eq("order_id", orderId)
+      .eq("student_id", user.id)
+      .eq("payment_stage", "advance")
+      .maybeSingle();
 
-  const { data: payment, error: paymentError } = await supabase
-    .from("payments")
-    .select(
-      `
-      id,
-      order_id,
-      student_id,
-      payment_stage,
-      amount,
-      status,
-      payment_method,
-      transaction_id
-      `
-    )
-    .eq("order_id", orderId)
-    .eq("student_id", user.id)
-    .eq("payment_stage", "advance")
-    .maybeSingle();
-
-  if (orderError || paymentError || !order || !payment) {
+  if (
+    orderError ||
+    paymentError ||
+    !order ||
+    !payment
+  ) {
     return (
       <main className="min-h-screen bg-slate-50 px-5 py-12 text-slate-900">
         <div className="mx-auto max-w-xl">
@@ -201,17 +199,15 @@ export default async function PaymentPage({
     ? order.cafes[0]
     : order.cafes;
 
+  const orderTotal = Number(order.total_amount) || 0;
+  const requiredPayment = Number(payment.amount) || 0;
+
   /*
-   * IMPORTANT:
-   * Instant Buy is identified from the actual database payment
-   * amount, not from a browser query parameter.
-   *
-   * Full order amount = Instant Buy
-   * 50% amount = Pre-order
-   */
+    Full payment = Instant Buy
+    Half payment = Pre-order
+  */
   const isInstantBuy =
-    Number(payment.amount) >=
-    Number(order.total_amount);
+    requiredPayment >= orderTotal - 0.01;
 
   const orderType = isInstantBuy
     ? "instant"
@@ -223,7 +219,7 @@ export default async function PaymentPage({
     paymentStatus === "unpaid"
       ? "Payment Required"
       : paymentStatus === "submitted"
-        ? "Verification Pending"
+        ? "Payment Submitted"
         : paymentStatus === "paid"
           ? "Payment Verified"
           : paymentStatus === "failed"
@@ -248,23 +244,22 @@ export default async function PaymentPage({
   const paymentMessage =
     paymentStatus === "unpaid"
       ? isInstantBuy
-        ? "Full payment is required now to confirm this Instant Buy order."
+        ? "Complete the full payment to confirm your Instant Buy order."
         : "Your 50% advance payment is required to continue the order."
       : paymentStatus === "submitted"
         ? isInstantBuy
-          ? "Your full payment has been submitted and is waiting for shopkeeper verification."
-          : "Your advance payment has been submitted and is waiting for shopkeeper verification."
+          ? "Your full payment has been submitted and is waiting for verification."
+          : "Your advance payment has been submitted and is waiting for verification."
         : paymentStatus === "paid"
           ? isInstantBuy
-            ? "Your full payment has been completed successfully."
-            : "Your advance payment has been verified successfully."
+            ? "Your full payment has been received and your Instant Buy order is confirmed."
+            : "Your advance payment has been received successfully. Your order is now confirmed."
           : paymentStatus === "failed"
             ? "The payment could not be completed. Please review the payment details and try again."
             : "Your payment record has been updated.";
 
   return (
     <main className="min-h-screen bg-slate-50 text-slate-900">
-      {/* Header */}
       <header className="border-b border-slate-200 bg-white">
         <div className="mx-auto flex max-w-6xl items-center justify-between gap-4 px-5 py-4 lg:px-8">
           <Link href="/" className="shrink-0">
@@ -290,7 +285,6 @@ export default async function PaymentPage({
       </header>
 
       <div className="mx-auto max-w-3xl px-5 py-10 lg:px-8 lg:py-12">
-        {/* Page Heading */}
         <div className="text-center">
           <span
             className={`inline-flex rounded-full px-3 py-1 text-xs font-bold uppercase tracking-wider ${
@@ -301,12 +295,12 @@ export default async function PaymentPage({
           >
             {isInstantBuy
               ? "Instant Buy"
-              : "Pre-order Payment"}
+              : "Pre-order"}
           </span>
 
           <h1 className="mt-3 text-3xl font-black tracking-tight text-slate-950 sm:text-4xl">
             {isInstantBuy
-              ? "Complete your Instant Buy payment"
+              ? "Complete your payment"
               : "Complete your advance payment"}
           </h1>
 
@@ -329,16 +323,8 @@ export default async function PaymentPage({
                 </h2>
               </div>
 
-              <span
-                className={`rounded-full px-3 py-1.5 text-xs font-bold ${
-                  isInstantBuy
-                    ? "bg-blue-50 text-blue-700"
-                    : "bg-slate-100 text-slate-600"
-                }`}
-              >
-                {isInstantBuy
-                  ? "Instant Buy"
-                  : "Pre-order"}
+              <span className="rounded-full bg-slate-100 px-3 py-1.5 text-xs font-bold text-slate-600">
+                {order.status}
               </span>
             </div>
 
@@ -359,7 +345,7 @@ export default async function PaymentPage({
                 </span>
 
                 <span className="font-black text-slate-950">
-                  ৳{Number(order.total_amount).toFixed(2)}
+                  ৳{orderTotal.toFixed(2)}
                 </span>
               </div>
 
@@ -367,18 +353,18 @@ export default async function PaymentPage({
                 <div className="flex items-center justify-between gap-5">
                   <span className="font-bold text-slate-700">
                     {isInstantBuy
-                      ? "Full payment"
+                      ? "Required payment"
                       : "Required advance"}
                   </span>
 
                   <span className="text-2xl font-black text-emerald-600">
-                    ৳{Number(payment.amount).toFixed(2)}
+                    ৳{requiredPayment.toFixed(2)}
                   </span>
                 </div>
 
                 <p className="mt-1 text-xs text-slate-500">
                   {isInstantBuy
-                    ? "100% of the order total"
+                    ? "100% payment for Instant Buy"
                     : "50% advance payment"}
                 </p>
               </div>
@@ -402,42 +388,46 @@ export default async function PaymentPage({
             <p className="mt-3 text-sm leading-6">
               {paymentMessage}
             </p>
-
-            <p className="mt-3 text-xs leading-5 opacity-80">
-              {isInstantBuy
-                ? "For Instant Buy, Cash confirms the order immediately. bKash requires shopkeeper verification."
-                : "Your order becomes confirmed after the required advance payment is submitted and verified by the shopkeeper."}
-            </p>
           </div>
 
-          {/* Cancellation Information */}
-          <div
-            className={`mt-5 rounded-2xl border p-5 ${
-              isInstantBuy
-                ? "border-blue-200 bg-blue-50"
-                : "border-slate-200 bg-white"
-            }`}
-          >
-            <p className="font-bold text-slate-900">
-              {isInstantBuy
-                ? "Instant Buy"
-                : "Cancellation window"}
-            </p>
+          {/* Cancellation / Instant Info */}
+          {!isInstantBuy ? (
+            <div className="mt-5 rounded-2xl border border-slate-200 bg-white p-5">
+              <p className="font-bold text-slate-900">
+                Cancellation window
+              </p>
 
-            <p className="mt-2 text-sm leading-6 text-slate-600">
-              {isInstantBuy
-                ? "Instant Buy does not use the 5-minute waiting period. After successful full payment, the order can proceed immediately."
-                : "You can cancel this order within 5 minutes of creation, subject to the order's current status and the system cancellation rules."}
-            </p>
-          </div>
+              <p className="mt-2 text-sm leading-6 text-slate-500">
+                This pre-order can be cancelled within 5 minutes of the
+                successful advance payment, subject to the order&apos;s
+                current status and system rules.
+              </p>
+            </div>
+          ) : (
+            <div className="mt-5 rounded-2xl border border-blue-200 bg-blue-50 p-5">
+              <p className="font-bold text-blue-800">
+                ⚡ Instant Buy
+              </p>
+
+              <p className="mt-2 text-sm leading-6 text-blue-700">
+                This order does not use the 5-minute cancellation window.
+                After successful payment submission, the order is
+                confirmed immediately.
+              </p>
+            </div>
+          )}
 
           {/* Payment Form */}
           <div className="mt-7">
             <AdvancePaymentForm
               orderId={order.id}
-              amount={Number(payment.amount)}
+              amount={requiredPayment}
               paymentStatus={payment.status}
               orderType={orderType}
+              bkashNumber={
+                cafeData?.bkash_number ?? null
+              }
+              cashoutFeePercentage={1.85}
             />
           </div>
 

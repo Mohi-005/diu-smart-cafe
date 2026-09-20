@@ -208,6 +208,7 @@ export default async function MenuPage({
       name,
       description,
       price,
+      discount_percentage,
       image_url,
       is_available,
       cafe_id,
@@ -260,6 +261,7 @@ export default async function MenuPage({
       name: item.name,
       description: item.description,
       price: Number(item.price),
+      discount_percentage: Number(item.discount_percentage ?? 0),
       image_url: item.image_url,
       is_available: item.is_available,
       cafe_id: item.cafe_id,
@@ -377,14 +379,42 @@ export default async function MenuPage({
                   </p>
 
                   <div className="mt-5 flex items-end justify-between gap-3">
-                    <p className="text-xl font-black text-slate-950">
-                      ৳{food.price.toFixed(2)}
-                    </p>
+                    <div>
+                      {food.discount_percentage > 0 ? (
+                        <>
+                          <div className="text-sm font-semibold text-slate-400 line-through">
+                            ৳{food.price.toFixed(2)}
+                          </div>
+
+                          <div className="mt-1 flex items-center gap-2">
+                            <p className="text-xl font-black text-slate-950">
+                              ৳{(food.price * (100 - food.discount_percentage) / 100).toFixed(2)}
+                            </p>
+
+                            <span className="rounded-full bg-amber-50 px-2 py-1 text-[11px] font-bold text-amber-700">
+                              {food.discount_percentage}% OFF
+                            </span>
+                          </div>
+                        </>
+                      ) : (
+                        <p className="text-xl font-black text-slate-950">
+                          ৳{food.price.toFixed(2)}
+                        </p>
+                      )}
+                    </div>
 
                     <AddToCartButton
                       id={food.id}
                       name={food.name}
-                      price={food.price}
+                      price={
+                        food.discount_percentage > 0
+                          ? Number(
+                              (food.price *
+                                (100 - food.discount_percentage)) /
+                                100
+                            )
+                          : food.price
+                      }
                       imageUrl={food.image_url}
                       cafeId={food.cafe_id}
                       cafeName={cafe.name}
