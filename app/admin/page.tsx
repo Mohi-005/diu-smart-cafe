@@ -15,6 +15,15 @@ type Stats = {
   payments: number;
 };
 
+type Cafe = {
+  id: string;
+  name: string;
+  bkash_number: string | null;
+  poster_url: string | null;
+  is_active: boolean;
+};
+
+
 export default function AdminPage() {
   const router = useRouter();
 
@@ -29,6 +38,34 @@ export default function AdminPage() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState("");
+  const [cafes, setCafes] = useState<Cafe[]>([]);
+  const [cafeLoading, setCafeLoading] = useState(true);
+  const [cafeWorkingId, setCafeWorkingId] = useState<string | null>(null);
+  const [editingCafeId, setEditingCafeId] = useState<string | null>(null);
+  const [editCafeName, setEditCafeName] = useState("");
+  const [editBkashNumber, setEditBkashNumber] = useState("");
+  const [editPosterUrl, setEditPosterUrl] = useState("");
+  const [cafeMessage, setCafeMessage] = useState("");
+  const [cafeError, setCafeError] = useState("");
+
+  const loadCafes = useCallback(async () => {
+    setCafeLoading(true);
+    setCafeError("");
+
+    const { data, error: cafesError } = await supabase
+      .from("cafes")
+      .select("id, name, bkash_number, poster_url, is_active")
+      .order("name");
+
+    if (cafesError) {
+      setCafeError(cafesError.message);
+      setCafes([]);
+    } else {
+      setCafes((data ?? []) as Cafe[]);
+    }
+
+    setCafeLoading(false);
+  }, []);
 
   const loadDashboard = useCallback(
     async (isRefresh = false) => {
@@ -100,7 +137,132 @@ export default function AdminPage() {
 
   useEffect(() => {
     loadDashboard();
-  }, [loadDashboard]);
+    loadCafes();
+  }, [loadDashboard, loadCafes]);
+
+  function startCafeEdit(cafe: Cafe) {
+    setEditingCafeId(cafe.id);
+    setEditCafeName(cafe.name);
+    setEditBkashNumber(cafe.bkash_number ?? "");
+    setEditPosterUrl(cafe.poster_url ?? "");
+    setCafeMessage("");
+    setCafeError("");
+  }
+
+  function cancelCafeEdit() {
+    setEditingCafeId(null);
+    setEditCafeName("");
+    setEditBkashNumber("");
+    setEditPosterUrl("");
+  }
+
+  async function saveCafeEdit(cafeId: string) {
+    if (!editCafeName.trim()) {
+      setCafeError("Cafe name is required.");
+      return;
+    }
+
+    setCafeWorkingId(cafeId);
+    setCafeError("");
+    setCafeMessage("");
+
+    const { error: updateError } = await supabase
+      .from("cafes")
+      .update({
+        name: editCafeName.trim(),
+        bkash_number: editBkashNumber.trim() || null,
+        poster_url: editPosterUrl.trim() || null,
+      })
+      .eq("id", cafeId);
+
+    if (updateError) {
+      setCafeError(updateError.message);
+    } else {
+      setCafeMessage("Cafe information updated successfully.");
+      cancelCafeEdit();
+      await loadCafes();
+      await loadDashboard(true);
+    }
+
+    setCafeWorkingId(null);
+  }
+
+  async function toggleCafe(cafe: Cafe) {
+    const actionText = cafe.is_active ? "temporarily hide" : "re-activate";
+
+    const confirmed = window.confirm(
+      `Are you sure you want to ${actionText} "${cafe.name}"?`
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    setCafeWorkingId(cafe.id);
+    setCafeError("");
+    setCafeMessage("");
+
+    const { error: updateError } = await supabase
+      .from("cafes")
+      .update({ is_active: !cafe.is_active })
+      .eq("id", cafe.id);
+
+    if (updateError) {
+      setCafeError(updateError.message);
+    } else {
+      setCafeMessage(
+        cafe.is_active
+          ? `"${cafe.name}" is now paused and hidden from students.`
+          : `"${cafe.name}" is active again and visible to students.`
+      );
+      await loadCafes();
+      await loadDashboard(true);
+    }
+
+    setCafeWorkingId(null);
+  }
+
+  async function deleteCafe(cafe: Cafe) {
+    const confirmed = window.confirm(
+      `Permanent Delete will remove "${cafe.name}" from the system. Continue?`
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    const doubleConfirmed = window.confirm(
+      "This is permanent. Make sure this is the correct test/cafe record before continuing."
+    );
+
+    if (!doubleConfirmed) {
+      return;
+    }
+
+    setCafeWorkingId(cafe.id);
+    setCafeError("");
+    setCafeMessage("");
+
+    const { error: deleteError } = await supabase
+      .from("cafes")
+      .delete()
+      .eq("id", cafe.id);
+
+    if (deleteError) {
+      setCafeError(
+        `${deleteError.message} If related records prevent deletion, use the database's configured cascade/delete rule before retrying.`
+      );
+    } else {
+      setCafeMessage(`"${cafe.name}" was permanently deleted.`);
+      if (editingCafeId === cafe.id) {
+        cancelCafeEdit();
+      }
+      await loadCafes();
+      await loadDashboard(true);
+    }
+
+    setCafeWorkingId(null);
+  }
 
   async function handleLogout() {
     await supabase.auth.signOut();
@@ -274,6 +436,237 @@ export default function AdminPage() {
             <p className="mt-1 text-xs text-pink-600">
               Total payment records
             </p>
+          </div>
+        </section>
+
+        {/* Cafe Management */}
+        <section className="mt-8 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm sm:p-7">
+          <div className="flex flex-col justify-between gap-4 md:flex-row md:items-end">
+            <div>
+              <p className="text-sm font-bold uppercase tracking-wider text-emerald-600">
+                Cafe Management
+              </p>
+
+              <h2 className="mt-2 text-2xl font-black text-slate-950">
+                Existing Cafes
+              </h2>
+
+              <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-500">
+                এখান থেকে existing shop/cafe-এর information edit, temporary pause
+                বা permanent delete করতে পারবেন। Pause করলে students cafe list-এ
+                cafe-টি আর দেখতে পাবে না।
+              </p>
+            </div>
+
+            <Link
+              href="/admin/shops"
+              className="inline-flex w-fit items-center justify-center rounded-xl bg-emerald-600 px-5 py-3 text-sm font-bold text-white transition hover:bg-emerald-700"
+            >
+              Admin Panel →
+            </Link>
+          </div>
+
+          {cafeMessage && (
+            <div className="mt-5 rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm font-semibold text-emerald-700">
+              {cafeMessage}
+            </div>
+          )}
+
+          {cafeError && (
+            <div className="mt-5 rounded-xl border border-red-200 bg-red-50 p-4 text-sm font-semibold text-red-700">
+              {cafeError}
+            </div>
+          )}
+
+          <div className="mt-6">
+            {cafeLoading ? (
+              <div className="rounded-2xl border border-slate-200 bg-slate-50 p-6 text-sm text-slate-500">
+                Loading cafes...
+              </div>
+            ) : cafes.length === 0 ? (
+              <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-8 text-center">
+                <p className="font-bold text-slate-900">No cafes found</p>
+                <p className="mt-2 text-sm text-slate-500">
+                  Use the Admin Panel to create a new shop/cafe.
+                </p>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                {cafes.map((cafe) => (
+                  <div
+                    key={cafe.id}
+                    className="rounded-2xl border border-slate-200 bg-slate-50 p-5"
+                  >
+                    <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
+                      <div className="min-w-0">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <h3 className="text-xl font-black text-slate-950">
+                            {cafe.name}
+                          </h3>
+
+                          <span
+                            className={`rounded-full px-3 py-1 text-xs font-bold ${
+                              cafe.is_active
+                                ? "bg-emerald-100 text-emerald-700"
+                                : "bg-slate-200 text-slate-600"
+                            }`}
+                          >
+                            {cafe.is_active ? "Active" : "Paused / Hidden"}
+                          </span>
+                        </div>
+
+                        <div className="mt-3 grid gap-2 text-sm text-slate-600 sm:grid-cols-2">
+                          <p>
+                            <span className="font-bold text-slate-700">
+                              bKash:
+                            </span>{" "}
+                            {cafe.bkash_number || "Not set"}
+                          </p>
+
+                          <p>
+                            <span className="font-bold text-slate-700">
+                              Student visibility:
+                            </span>{" "}
+                            {cafe.is_active ? "Visible" : "Hidden"}
+                          </p>
+                        </div>
+
+                        {cafe.poster_url && (
+                          <a
+                            href={cafe.poster_url}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="mt-3 inline-block text-sm font-bold text-emerald-700 hover:underline"
+                          >
+                            Open cafe poster →
+                          </a>
+                        )}
+                      </div>
+
+                      <div className="flex flex-wrap gap-2">
+                        <button
+                          type="button"
+                          onClick={() => startCafeEdit(cafe)}
+                          disabled={cafeWorkingId === cafe.id}
+                          className="rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm font-bold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                        >
+                          Edit
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => toggleCafe(cafe)}
+                          disabled={cafeWorkingId === cafe.id}
+                          className={`rounded-xl px-4 py-2.5 text-sm font-bold text-white disabled:opacity-50 ${
+                            cafe.is_active
+                              ? "bg-amber-500 hover:bg-amber-600"
+                              : "bg-emerald-600 hover:bg-emerald-700"
+                          }`}
+                        >
+                          {cafe.is_active ? "Pause / Hide" : "Activate / Show"}
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => deleteCafe(cafe)}
+                          disabled={cafeWorkingId === cafe.id}
+                          className="rounded-xl border border-red-200 bg-white px-4 py-2.5 text-sm font-bold text-red-600 hover:bg-red-50 disabled:opacity-50"
+                        >
+                          Permanent Delete
+                        </button>
+                      </div>
+                    </div>
+
+                    {editingCafeId === cafe.id && (
+                      <div className="mt-5 rounded-2xl border border-emerald-200 bg-white p-5">
+                        <p className="text-sm font-bold uppercase tracking-wider text-emerald-600">
+                          Edit Cafe
+                        </p>
+
+                        <div className="mt-4 grid gap-4 md:grid-cols-2">
+                          <div>
+                            <label
+                              htmlFor={`cafe-name-${cafe.id}`}
+                              className="mb-2 block text-sm font-bold text-slate-700"
+                            >
+                              Cafe Name
+                            </label>
+
+                            <input
+                              id={`cafe-name-${cafe.id}`}
+                              value={editCafeName}
+                              onChange={(event) =>
+                                setEditCafeName(event.target.value)
+                              }
+                              className="w-full rounded-xl border border-slate-300 px-4 py-3 text-sm outline-none focus:border-emerald-500 focus:ring-4 focus:ring-emerald-100"
+                            />
+                          </div>
+
+                          <div>
+                            <label
+                              htmlFor={`cafe-bkash-${cafe.id}`}
+                              className="mb-2 block text-sm font-bold text-slate-700"
+                            >
+                              bKash Number
+                            </label>
+
+                            <input
+                              id={`cafe-bkash-${cafe.id}`}
+                              value={editBkashNumber}
+                              onChange={(event) =>
+                                setEditBkashNumber(event.target.value)
+                              }
+                              className="w-full rounded-xl border border-slate-300 px-4 py-3 text-sm outline-none focus:border-emerald-500 focus:ring-4 focus:ring-emerald-100"
+                            />
+                          </div>
+
+                          <div className="md:col-span-2">
+                            <label
+                              htmlFor={`cafe-poster-${cafe.id}`}
+                              className="mb-2 block text-sm font-bold text-slate-700"
+                            >
+                              Poster URL
+                            </label>
+
+                            <input
+                              id={`cafe-poster-${cafe.id}`}
+                              value={editPosterUrl}
+                              onChange={(event) =>
+                                setEditPosterUrl(event.target.value)
+                              }
+                              placeholder="https://..."
+                              className="w-full rounded-xl border border-slate-300 px-4 py-3 text-sm outline-none focus:border-emerald-500 focus:ring-4 focus:ring-emerald-100"
+                            />
+                          </div>
+                        </div>
+
+                        <div className="mt-5 flex flex-wrap gap-2">
+                          <button
+                            type="button"
+                            onClick={() => saveCafeEdit(cafe.id)}
+                            disabled={cafeWorkingId === cafe.id}
+                            className="rounded-xl bg-emerald-600 px-5 py-2.5 text-sm font-bold text-white hover:bg-emerald-700 disabled:opacity-50"
+                          >
+                            {cafeWorkingId === cafe.id
+                              ? "Saving..."
+                              : "Save Changes"}
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={cancelCafeEdit}
+                            disabled={cafeWorkingId === cafe.id}
+                            className="rounded-xl border border-slate-300 bg-white px-5 py-2.5 text-sm font-bold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         </section>
 
