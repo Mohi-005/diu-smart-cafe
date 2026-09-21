@@ -121,7 +121,9 @@ export default function StudentOrdersPage() {
     if (ordersError) {
       setError(ordersError.message);
     } else {
-      setOrders(data || []);
+      setOrders(
+        (data || []).filter((order) => order.status !== "cancelled")
+      );
     }
 
     setLoading(false);
@@ -180,7 +182,7 @@ export default function StudentOrdersPage() {
             </h1>
 
             <p className="mt-3 text-sm leading-6 text-slate-500 sm:text-base">
-              View your complete order history and current order status.
+              View your active and completed order history and current order status.
             </p>
           </div>
 
@@ -321,9 +323,6 @@ export default function StudentOrdersPage() {
                       Collected
                     </option>
 
-                    <option value="cancelled">
-                      Cancelled
-                    </option>
                   </select>
                 </div>
               </div>
