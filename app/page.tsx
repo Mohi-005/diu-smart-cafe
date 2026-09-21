@@ -1,5 +1,7 @@
 import Link from "next/link";
 
+import { createClient } from "@/lib/supabase/server";
+
 import CafeCard from "@/components/CafeCard";
 import FoodCard from "@/components/FoodCard";
 import Footer from "@/components/Footer";
@@ -8,63 +10,95 @@ import HowItWorks from "@/components/HowItWorks";
 import Navbar from "@/components/Navbar";
 import ShopkeeperCTA from "@/components/ShopkeeperCTA";
 
-const cafes = [
-  {
-    name: "Main Cafeteria",
-    description: "Daily meals, snacks and student favorites",
-    crowd: "Medium",
-    color: "bg-emerald-50 text-emerald-700",
-  },
-  {
-    name: "Food Court",
-    description: "Multiple food options in one place",
-    crowd: "Low",
-    color: "bg-blue-50 text-blue-700",
-  },
-  {
-    name: "Other Campus Shops",
-    description: "Quick bites, drinks and snacks",
-    crowd: "Low",
-    color: "bg-purple-50 text-purple-700",
-  },
-];
+type Cafe = {
+  id: string;
+  name: string;
+  description: string | null;
+  location: string | null;
+  logo_url: string | null;
+};
 
-const foods = [
-  {
-    name: "Chicken Biryani",
-    category: "Lunch",
-    price: 120,
-    cafe: "Main Cafeteria",
-    available: true,
-    emoji: "🍗",
-  },
-  {
-    name: "Kacchi",
-    category: "Lunch",
-    price: 180,
-    cafe: "Food Court",
-    available: true,
-    emoji: "🍛",
-  },
-  {
-    name: "Chicken Khichuri",
-    category: "Meal",
-    price: 100,
-    cafe: "Main Cafeteria",
-    available: true,
-    emoji: "🍲",
-  },
-  {
-    name: "Beef Burger",
-    category: "Fast Food",
-    price: 150,
-    cafe: "Food Court",
-    available: false,
-    emoji: "🍔",
-  },
-];
+type Food = {
+  id: string;
+  name: string;
+  price: number;
+  discount_percentage: number;
+  image_url: string | null;
+  is_available: boolean;
+  cafe_id: string;
+  category_name: string;
+  cafe_name: string;
+};
 
-export default function Home() {
+export default async function Home() {
+  const supabase = await createClient();
+
+  // ---------------------------------------------------------
+  // Load active cafes dynamically from database
+  // ---------------------------------------------------------
+  const { data: cafeData, error: cafesError } = await supabase
+    .from("cafes")
+    .select("id, name, description, location, logo_url")
+    .eq("status", "active")
+    .eq("is_active", true)
+    .order("name", { ascending: true })
+    .limit(3);
+
+  const cafes = (cafeData ?? []) as Cafe[];
+
+  // ---------------------------------------------------------
+  // Load active food items dynamically
+  // ---------------------------------------------------------
+  let foods: Food[] = [];
+
+  if (cafes.length > 0) {
+    const cafeIds = cafes.map((cafe) => cafe.id);
+
+    const { data: foodData } = await supabase
+      .from("menu_items")
+      .select(
+        `
+        id,
+        name,
+        price,
+        discount_percentage,
+        image_url,
+        is_available,
+        cafe_id,
+        menu_categories (
+          name
+        )
+        `
+      )
+      .in("cafe_id", cafeIds)
+      .eq("is_active", true)
+      .order("created_at", { ascending: false })
+      .limit(4);
+
+    const cafeNameMap = new Map(
+      cafes.map((cafe) => [cafe.id, cafe.name])
+    );
+
+    foods = (foodData ?? []).map((item) => {
+      const categoryData = Array.isArray(item.menu_categories)
+        ? item.menu_categories[0]
+        : item.menu_categories;
+
+      return {
+        id: item.id,
+        name: item.name,
+        price: Number(item.price),
+        discount_percentage: Number(item.discount_percentage ?? 0),
+        image_url: item.image_url,
+        is_available: item.is_available,
+        cafe_id: item.cafe_id,
+        category_name: categoryData?.name ?? "Uncategorized",
+        cafe_name:
+          cafeNameMap.get(item.cafe_id) ?? "Campus Cafe",
+      };
+    });
+  }
+
   return (
     <main className="min-h-screen bg-white text-slate-900">
       <Navbar />
@@ -88,8 +122,8 @@ export default function Home() {
               </h2>
 
               <p className="mt-4 text-base leading-7 text-slate-600">
-                Check different food points around campus before placing your
-                order.
+                Check different food points around campus before placing
+                your order.
               </p>
             </div>
 
@@ -102,17 +136,38 @@ export default function Home() {
             </Link>
           </div>
 
-          <div className="mt-10 grid gap-5 md:grid-cols-3">
-            {cafes.map((cafe) => (
-              <CafeCard
-                key={cafe.name}
-                name={cafe.name}
-                description={cafe.description}
-                crowd={cafe.crowd}
-                color={cafe.color}
-              />
-            ))}
-          </div>
+          {cafesError ? (
+            <div className="mt-10 rounded-2xl border border-red-200 bg-red-50 p-6 text-red-700">
+              <p className="font-bold">Unable to load cafes.</p>
+
+              <p className="mt-2 text-sm">
+                {cafesError.message}
+              </p>
+            </div>
+          ) : cafes.length === 0 ? (
+            <div className="mt-10 rounded-2xl border border-slate-200 bg-slate-50 p-10 text-center">
+              <p className="text-lg font-bold text-slate-950">
+                No Active Cafe Available
+              </p>
+
+              <p className="mt-2 text-sm text-slate-500">
+                Please check again later.
+              </p>
+            </div>
+          ) : (
+            <div className="mt-10 grid gap-5 md:grid-cols-3">
+              {cafes.map((cafe) => (
+                <CafeCard
+                  key={cafe.id}
+                  id={cafe.id}
+                  name={cafe.name}
+                  description={cafe.description}
+                  location={cafe.location}
+                  logoUrl={cafe.logo_url}
+                />
+              ))}
+            </div>
+          )}
         </div>
       </section>
 
@@ -146,38 +201,34 @@ export default function Home() {
             </Link>
           </div>
 
-          {/* Category overview */}
-          <div className="mt-8 flex flex-wrap gap-2">
-            <span className="rounded-full bg-slate-900 px-4 py-2 text-xs font-bold text-white">
-              All
-            </span>
+          {cafes.length === 0 ? null : foods.length === 0 ? (
+            <div className="mt-10 rounded-2xl border border-slate-200 bg-white p-10 text-center">
+              <p className="text-lg font-bold text-slate-950">
+                No food items are available yet.
+              </p>
 
-            <span className="rounded-full border border-slate-200 bg-white px-4 py-2 text-xs font-bold text-slate-600">
-              Lunch
-            </span>
-
-            <span className="rounded-full border border-slate-200 bg-white px-4 py-2 text-xs font-bold text-slate-600">
-              Fast Food
-            </span>
-
-            <span className="rounded-full border border-slate-200 bg-white px-4 py-2 text-xs font-bold text-slate-600">
-              Snacks
-            </span>
-          </div>
-
-          <div className="mt-8 grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
-            {foods.map((food) => (
-              <FoodCard
-                key={food.name}
-                name={food.name}
-                category={food.category}
-                price={food.price}
-                cafe={food.cafe}
-                available={food.available}
-                emoji={food.emoji}
-              />
-            ))}
-          </div>
+              <p className="mt-2 text-sm text-slate-500">
+                Shopkeepers have not added any active food items yet.
+              </p>
+            </div>
+          ) : (
+            <div className="mt-10 grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
+              {foods.map((food) => (
+                <FoodCard
+                  key={food.id}
+                  id={food.id}
+                  name={food.name}
+                  category={food.category_name}
+                  price={food.price}
+                  cafe={food.cafe_name}
+                  cafeId={food.cafe_id}
+                  available={food.is_available}
+                  imageUrl={food.image_url}
+                  discountPercentage={food.discount_percentage}
+                />
+              ))}
+            </div>
+          )}
 
           <div className="mt-10 flex justify-center">
             <Link

@@ -2,6 +2,14 @@ This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-
 
 ## Getting Started
 
+## Supabase rollout
+
+Before deploying the frontend, run the SQL files in the Supabase SQL Editor in order. `phase-33-secure-payment-refund.sql` adds the server-enforced payment fee, cancellation timer, refund lockout, refund history, and shop-ownership rules.
+
+Deploy the `send-refund-email` Edge Function after the migration and configure its `RESEND_API_KEY` and `REFUND_EMAIL_FROM` secrets. The function sends the completed-refund receipt to the student only.
+
+The browser must never receive `SUPABASE_SERVICE_ROLE_KEY`; keep it server-side only. Rotate any credential that was stored in a document or committed to source control.
+
 First, run the development server:
 
 ```bash

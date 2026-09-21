@@ -32,6 +32,7 @@ type Payment = {
 
 type RefundHistory = {
   amount: number;
+  cashout_fee_amount: number;
   payment_method: string | null;
   transaction_id: string | null;
   refund_method: string | null;
@@ -616,7 +617,7 @@ export default function OrderDetailsPage() {
 
           {/* Order Information */}
           <div className="mt-6 space-y-4">
-            <div className="flex justify-between gap-5">
+                    <div className="flex justify-between gap-5">
               <span className="text-sm text-slate-600">
                 Order Total
               </span>
@@ -804,6 +805,7 @@ export default function OrderDetailsPage() {
                         Cash
                       </button>
                     </div>
+
                   </div>
 
                   {/* bKash Summary */}
@@ -1091,6 +1093,16 @@ export default function OrderDetailsPage() {
                       <span className="font-bold text-slate-900">
                         {refund.refund_method ||
                           "Not available"}
+                      </span>
+                    </div>
+
+                    <div className="flex justify-between gap-4">
+                      <span className="text-sm text-slate-500">
+                        bKash cash-out fee
+                      </span>
+
+                      <span className="font-bold text-slate-900">
+                        ৳{Number(refund.cashout_fee_amount || 0).toFixed(2)}
                       </span>
                     </div>
 

@@ -98,29 +98,19 @@ export default function AdvancePaymentForm({
 
     setSubmitting(true);
 
-    const rpcName =
-      paymentMethod === "cash"
-        ? "submit_instant_cash_payment"
-        : "submit_manual_payment";
-
-    const rpcArgs =
-      paymentMethod === "cash"
-        ? {
-            p_target_order_id: orderId,
-          }
-        : {
-            p_order_id: orderId,
-            p_payment_method: paymentMethod,
-            p_transaction_id:
-              transactionId.trim(),
-          };
-
     const {
       data,
       error: paymentError,
     } = await supabase.rpc(
-      rpcName,
-      rpcArgs
+      "submit_manual_payment",
+      {
+        p_order_id: orderId,
+        p_payment_method: paymentMethod,
+        p_transaction_id:
+          paymentMethod === "bkash"
+            ? transactionId.trim()
+            : null,
+      }
     );
 
     if (paymentError) {

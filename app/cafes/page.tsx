@@ -1,6 +1,15 @@
 import Link from "next/link";
+
 import { createClient } from "@/lib/supabase/server";
 import StudentHeader from "@/components/student/StudentHeader";
+
+type Cafe = {
+  id: string;
+  name: string;
+  description: string | null;
+  location: string | null;
+  logo_url: string | null;
+};
 
 export default async function CafesPage() {
   const supabase = await createClient();
@@ -21,11 +30,16 @@ export default async function CafesPage() {
     fullName = profile?.full_name ?? null;
   }
 
-  const { data: cafes, error } = await supabase
+  const { data: cafeData, error } = await supabase
     .from("cafes")
-    .select("id, name, description, location")
+    .select(
+      "id, name, description, location, logo_url"
+    )
+    .eq("status", "active")
     .eq("is_active", true)
-    .order("name");
+    .order("name", { ascending: true });
+
+  const cafes = (cafeData ?? []) as Cafe[];
 
   return (
     <main className="min-h-screen bg-slate-50 text-slate-900">
@@ -58,10 +72,10 @@ export default async function CafesPage() {
 
             <p className="mt-2">{error.message}</p>
           </div>
-        ) : !cafes || cafes.length === 0 ? (
+        ) : cafes.length === 0 ? (
           <div className="mt-10 rounded-2xl border border-slate-200 bg-white p-10 text-center">
             <p className="text-lg font-bold text-slate-950">
-              No cafes are available right now.
+              No Active Cafe Available
             </p>
 
             <p className="mt-2 text-sm text-slate-500">
@@ -76,8 +90,16 @@ export default async function CafesPage() {
                 className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm transition hover:-translate-y-1 hover:shadow-xl sm:p-7"
               >
                 <div className="flex items-start justify-between gap-5">
-                  <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-emerald-50 text-2xl">
-                    🍽️
+                  <div className="flex h-14 w-14 items-center justify-center overflow-hidden rounded-2xl bg-emerald-50 text-2xl">
+                    {cafe.logo_url ? (
+                      <img
+                        src={cafe.logo_url}
+                        alt={`${cafe.name} logo`}
+                        className="h-full w-full object-cover"
+                      />
+                    ) : (
+                      <span aria-hidden="true">🍽️</span>
+                    )}
                   </div>
 
                   <span className="rounded-full bg-emerald-50 px-3 py-1.5 text-xs font-bold text-emerald-700">
@@ -101,7 +123,7 @@ export default async function CafesPage() {
                 )}
 
                 <Link
-                  href={`/menu?cafe=${cafe.id}`}
+                  href={`/menu?cafe=${encodeURIComponent(cafe.id)}`}
                   className="mt-7 block rounded-xl bg-slate-900 px-5 py-3.5 text-center text-sm font-bold text-white transition hover:bg-slate-800"
                 >
                   View Menu

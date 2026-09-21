@@ -14,6 +14,7 @@ type Cafe = {
   name: string;
   description: string | null;
   location: string | null;
+  logo_url: string | null;
 };
 
 export default async function MenuPage({
@@ -40,14 +41,18 @@ export default async function MenuPage({
     fullName = profile?.full_name ?? null;
   }
 
-  /*
-   * If no cafe is selected, show all active cafes.
-   * This allows users to enter /menu directly from the homepage.
-   */
+  /* -------------------------------------------------------
+     1. No cafe selected
+     Show only active cafes
+  ------------------------------------------------------- */
+
   if (!cafeId) {
     const { data: cafes, error: cafesError } = await supabase
       .from("cafes")
-      .select("id, name, description, location")
+      .select(
+        "id, name, description, location, logo_url"
+      )
+      .eq("status", "active")
       .eq("is_active", true)
       .order("name", { ascending: true });
 
@@ -101,15 +106,15 @@ export default async function MenuPage({
             </h1>
 
             <p className="mt-4 max-w-2xl text-sm leading-6 text-slate-300 sm:text-base">
-              Select a cafe to see its available food items and place
-              your order.
+              Select a cafe to see its available food items and
+              place your order.
             </p>
           </div>
 
           {activeCafes.length === 0 ? (
             <div className="mt-8 rounded-2xl border border-slate-200 bg-white p-10 text-center shadow-sm">
               <p className="text-lg font-bold text-slate-950">
-                No active cafes are available.
+                No Active Cafe Available
               </p>
 
               <p className="mt-2 text-sm text-slate-500">
@@ -121,25 +126,39 @@ export default async function MenuPage({
               {activeCafes.map((cafe) => (
                 <Link
                   key={cafe.id}
-                  href={`/menu?cafe=${encodeURIComponent(cafe.id)}`}
+                  href={`/menu?cafe=${encodeURIComponent(
+                    cafe.id
+                  )}`}
                   className="group rounded-2xl border border-slate-200 bg-white p-6 shadow-sm transition hover:-translate-y-1 hover:border-emerald-200 hover:shadow-lg"
                 >
                   <div className="flex items-start justify-between gap-4">
-                    <div>
-                      <h2 className="text-xl font-extrabold text-slate-950">
-                        {cafe.name}
-                      </h2>
-
-                      <p className="mt-2 text-sm leading-6 text-slate-500">
-                        {cafe.description ||
-                          "Browse this cafe's available food menu."}
-                      </p>
+                    <div className="flex h-14 w-14 items-center justify-center overflow-hidden rounded-xl bg-slate-100 text-2xl">
+                      {cafe.logo_url ? (
+                        <img
+                          src={cafe.logo_url}
+                          alt={`${cafe.name} logo`}
+                          className="h-full w-full object-cover"
+                        />
+                      ) : (
+                        <span aria-hidden="true">
+                          🍽️
+                        </span>
+                      )}
                     </div>
 
-                    <span className="text-2xl transition group-hover:translate-x-1">
-                      →
+                    <span className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-bold text-emerald-700">
+                      Open
                     </span>
                   </div>
+
+                  <h2 className="mt-6 text-xl font-extrabold text-slate-950">
+                    {cafe.name}
+                  </h2>
+
+                  <p className="mt-2 text-sm leading-6 text-slate-500">
+                    {cafe.description ||
+                      "Browse this cafe's available food menu."}
+                  </p>
 
                   {cafe.location && (
                     <p className="mt-5 text-xs font-semibold text-slate-400">
@@ -161,11 +180,18 @@ export default async function MenuPage({
     );
   }
 
-  // Get selected cafe
+  /* -------------------------------------------------------
+     2. Load selected cafe
+     Only active cafe can be opened by students
+  ------------------------------------------------------- */
+
   const { data: cafe, error: cafeError } = await supabase
     .from("cafes")
-    .select("id, name, description, location")
+    .select(
+      "id, name, description, location, logo_url"
+    )
     .eq("id", cafeId)
+    .eq("status", "active")
     .eq("is_active", true)
     .maybeSingle();
 
@@ -199,7 +225,10 @@ export default async function MenuPage({
     );
   }
 
-  // Get foods ONLY from selected cafe
+  /* -------------------------------------------------------
+     3. Load food items from selected cafe
+  ------------------------------------------------------- */
+
   const { data, error } = await supabase
     .from("menu_items")
     .select(
@@ -261,11 +290,14 @@ export default async function MenuPage({
       name: item.name,
       description: item.description,
       price: Number(item.price),
-      discount_percentage: Number(item.discount_percentage ?? 0),
+      discount_percentage: Number(
+        item.discount_percentage ?? 0
+      ),
       image_url: item.image_url,
       is_available: item.is_available,
       cafe_id: item.cafe_id,
-      category_name: categoryData?.name ?? "Uncategorized",
+      category_name:
+        categoryData?.name ?? "Uncategorized",
     };
   });
 
@@ -278,28 +310,40 @@ export default async function MenuPage({
 
       <div className="mx-auto max-w-7xl px-5 py-10 lg:px-8">
         {/* Cafe heading */}
-        <div className="rounded-3xl bg-slate-900 p-7 text-white sm:p-9">
-          <Link
-            href="/menu"
-            className="text-sm font-semibold text-emerald-300 hover:text-emerald-200"
-          >
-            ← Back to cafes
-          </Link>
-
-          <h1 className="mt-6 text-4xl font-black tracking-tight sm:text-5xl">
-            {cafe.name}
-          </h1>
-
-          <p className="mt-3 max-w-2xl text-sm leading-6 text-slate-300 sm:text-base">
-            {cafe.description ||
-              "Browse this cafe's available food menu."}
-          </p>
-
-          {cafe.location && (
-            <p className="mt-4 text-xs font-semibold text-slate-400">
-              📍 {cafe.location}
-            </p>
+        <div className="overflow-hidden rounded-3xl bg-slate-900 text-white">
+          {cafe.logo_url && (
+            <div className="h-56 w-full overflow-hidden">
+              <img
+                src={cafe.logo_url}
+                alt={`${cafe.name} logo`}
+                className="h-full w-full object-cover opacity-80"
+              />
+            </div>
           )}
+
+          <div className="p-7 sm:p-9">
+            <Link
+              href="/menu"
+              className="text-sm font-semibold text-emerald-300 hover:text-emerald-200"
+            >
+              ← Back to cafes
+            </Link>
+
+            <h1 className="mt-6 text-4xl font-black tracking-tight sm:text-5xl">
+              {cafe.name}
+            </h1>
+
+            <p className="mt-3 max-w-2xl text-sm leading-6 text-slate-300 sm:text-base">
+              {cafe.description ||
+                "Browse this cafe's available food menu."}
+            </p>
+
+            {cafe.location && (
+              <p className="mt-4 text-xs font-semibold text-slate-400">
+                📍 {cafe.location}
+              </p>
+            )}
+          </div>
         </div>
 
         {/* Menu heading */}
@@ -332,7 +376,6 @@ export default async function MenuPage({
                 key={food.id}
                 className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm transition hover:-translate-y-1 hover:shadow-xl"
               >
-                {/* Image */}
                 <div className="h-52 overflow-hidden bg-slate-100">
                   {food.image_url ? (
                     <img
@@ -347,7 +390,6 @@ export default async function MenuPage({
                   )}
                 </div>
 
-                {/* Details */}
                 <div className="p-5">
                   <div className="flex items-start justify-between gap-3">
                     <div>
@@ -388,7 +430,13 @@ export default async function MenuPage({
 
                           <div className="mt-1 flex items-center gap-2">
                             <p className="text-xl font-black text-slate-950">
-                              ৳{(food.price * (100 - food.discount_percentage) / 100).toFixed(2)}
+                              ৳
+                              {(
+                                (food.price *
+                                  (100 -
+                                    food.discount_percentage)) /
+                                100
+                              ).toFixed(2)}
                             </p>
 
                             <span className="rounded-full bg-amber-50 px-2 py-1 text-[11px] font-bold text-amber-700">
@@ -410,7 +458,8 @@ export default async function MenuPage({
                         food.discount_percentage > 0
                           ? Number(
                               (food.price *
-                                (100 - food.discount_percentage)) /
+                                (100 -
+                                  food.discount_percentage)) /
                                 100
                             )
                           : food.price

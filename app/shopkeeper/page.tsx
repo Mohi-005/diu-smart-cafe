@@ -3,7 +3,8 @@ import { createClient } from "@/lib/supabase/server";
 import ShopkeeperDashboard from "./ShopkeeperDashboard";
 
 export default async function ShopkeeperPage() {
-  const supabase = await createClient();
+  const supabase =
+    await createClient();
 
   /* -------------------------------------------------------
      1. Get logged-in user
@@ -11,7 +12,8 @@ export default async function ShopkeeperPage() {
 
   const {
     data: { user },
-  } = await supabase.auth.getUser();
+  } =
+    await supabase.auth.getUser();
 
   if (!user) {
     redirect("/login");
@@ -21,7 +23,10 @@ export default async function ShopkeeperPage() {
      2. Verify shopkeeper role
   ------------------------------------------------------- */
 
-  const { data: profile, error: profileError } =
+  const {
+    data: profile,
+    error: profileError,
+  } =
     await supabase
       .from("profiles")
       .select("role")
@@ -53,21 +58,35 @@ export default async function ShopkeeperPage() {
   }
 
   /* -------------------------------------------------------
-     3. Find ONLY this shopkeeper's shop
-     owner_id = authenticated user.id
+     3. Find shop ONLY through shopkeeper_id
   ------------------------------------------------------- */
 
-  const { data: cafe, error: cafeError } =
+  const {
+    data: cafe,
+    error: cafeError,
+  } =
     await supabase
       .from("cafes")
       .select(
-        "id, name, logo_url, phone_number, bkash_number, is_active"
+        `
+        id,
+        name,
+        logo_url,
+        phone_number,
+        bkash_number,
+        shopkeeper_id,
+        status,
+        is_active
+        `
       )
-      .eq("owner_id", user.id)
+      .eq(
+        "shopkeeper_id",
+        user.id
+      )
       .maybeSingle();
 
   /* -------------------------------------------------------
-     4. No shop assigned
+     4. Database error
   ------------------------------------------------------- */
 
   if (cafeError) {
@@ -86,6 +105,10 @@ export default async function ShopkeeperPage() {
     );
   }
 
+  /* -------------------------------------------------------
+     5. No shop assigned
+  ------------------------------------------------------- */
+
   if (!cafe) {
     return (
       <main className="flex min-h-screen items-center justify-center bg-slate-50 px-5">
@@ -99,8 +122,8 @@ export default async function ShopkeeperPage() {
           </h1>
 
           <p className="mt-3 text-sm leading-6 text-slate-500">
-            Your shopkeeper account is valid, but no cafe is currently
-            connected to this account.
+            Your shopkeeper account is valid, but no shop is
+            currently connected to this account.
           </p>
 
           <p className="mt-4 text-xs font-semibold text-slate-400">
@@ -112,10 +135,14 @@ export default async function ShopkeeperPage() {
   }
 
   /* -------------------------------------------------------
-     5. Inactive shop protection
+     6. Shop status protection
   ------------------------------------------------------- */
 
-  if (!cafe.is_active) {
+  if (
+    cafe.status === "paused" ||
+    cafe.status === "hidden" ||
+    cafe.is_active === false
+  ) {
     return (
       <main className="flex min-h-screen items-center justify-center bg-slate-50 px-5">
         <div className="w-full max-w-xl rounded-3xl border border-slate-200 bg-white p-8 text-center shadow-sm">
@@ -128,8 +155,8 @@ export default async function ShopkeeperPage() {
           </h1>
 
           <p className="mt-3 text-sm leading-6 text-slate-500">
-            Your shop is currently inactive. Please contact the
-            administrator.
+            Your shop is currently paused or hidden by the
+            administrator. Please contact the administrator.
           </p>
         </div>
       </main>
@@ -137,7 +164,7 @@ export default async function ShopkeeperPage() {
   }
 
   /* -------------------------------------------------------
-     6. Render ONLY this shop's dashboard
+     7. Render ONLY this shop's dashboard
   ------------------------------------------------------- */
 
   return (

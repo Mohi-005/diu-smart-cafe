@@ -17,9 +17,6 @@ Deno.serve(async (req) => {
     const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
     const resendApiKey = Deno.env.get("RESEND_API_KEY");
     const refundEmailFrom = Deno.env.get("REFUND_EMAIL_FROM");
-    const shopkeeperEmail = Deno.env.get(
-      "SHOPKEEPER_NOTIFICATION_EMAIL"
-    );
 
     if (!supabaseUrl || !supabaseAnonKey || !serviceRoleKey) {
       throw new Error("Supabase environment variables are missing.");
@@ -31,12 +28,6 @@ Deno.serve(async (req) => {
 
     if (!refundEmailFrom) {
       throw new Error("REFUND_EMAIL_FROM is missing.");
-    }
-
-    if (!shopkeeperEmail) {
-      throw new Error(
-        "SHOPKEEPER_NOTIFICATION_EMAIL is missing."
-      );
     }
 
     const authHeader = req.headers.get("Authorization");
@@ -87,8 +78,11 @@ Deno.serve(async (req) => {
           order_id,
           student_id,
           amount,
+          cashout_fee_amount,
           payment_method,
           transaction_id,
+          refund_method,
+          refund_transaction_id,
           status,
           payment_stage
           `
@@ -151,6 +145,8 @@ Deno.serve(async (req) => {
           `
           id,
           refunded_by,
+          refund_method,
+          refund_transaction_id,
           refunded_at
           `
         )
@@ -221,6 +217,21 @@ Deno.serve(async (req) => {
         </p>
 
         <p>
+          <strong>Cash-out Fee:</strong>
+          ৳${Number(payment.cashout_fee_amount || 0).toFixed(2)}
+        </p>
+
+        <p>
+          <strong>Refund Method:</strong>
+          ${history.refund_method || payment.refund_method || "N/A"}
+        </p>
+
+        <p>
+          <strong>Refund Transaction ID:</strong>
+          ${history.refund_transaction_id || payment.refund_transaction_id || "N/A"}
+        </p>
+
+        <p>
           <strong>Refund Completed At:</strong>
           ${history.refunded_at}
         </p>
@@ -241,7 +252,7 @@ Deno.serve(async (req) => {
         },
         body: JSON.stringify({
           from: refundEmailFrom,
-          to: [studentEmail, shopkeeperEmail],
+          to: [studentEmail],
           subject,
           html,
         }),

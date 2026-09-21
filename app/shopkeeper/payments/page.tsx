@@ -152,8 +152,15 @@ export default function ShopkeeperPaymentsPage() {
     if (rpcError) {
       setError(rpcError.message);
     } else {
+      const { error: emailError } = await supabase.functions.invoke(
+        "send-refund-email",
+        { body: { payment_id: refund.payment_id } }
+      );
+
       setMessage(
-        `Token ${refund.token_code}-এর refund successfully recorded.`
+        emailError
+          ? `Token ${refund.token_code}-এর refund recorded হয়েছে। Email notification পাঠানো যায়নি; আবার চেষ্টা করুন।`
+          : `Token ${refund.token_code}-এর refund successfully recorded এবং student-কে email পাঠানো হয়েছে।`
       );
 
       setRefundSecret((prev) => {
