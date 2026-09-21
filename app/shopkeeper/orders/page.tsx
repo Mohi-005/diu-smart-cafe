@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { createClient } from "@/lib/supabase/client";
 
 type ShopkeeperOrder = {
   order_id: string;
@@ -24,7 +23,6 @@ type ShopkeeperOrder = {
   remaining_payment_status?: string | null;
 };
 
-const supabase = createClient();
 
 function formatTime(seconds: number) {
   const safe = Math.max(seconds, 0);
@@ -82,23 +80,67 @@ export default function ShopkeeperOrdersPage() {
     setLoading(true);
     setError("");
 
-    const { data, error: loadError } =
-      await supabase.rpc(
-        "get_shopkeeper_order_payment_data_v2"
+    try {
+      const response = await fetch(
+        "/api/shopkeeper/orders",
+        {
+          method: "GET",
+          cache: "no-store",
+        }
       );
 
-    if (loadError) {
-      setError(loadError.message);
-      setOrders([]);
-    } else {
+      const result = await response.json();
+
+      if (!response.ok) {
+        setError(result.error || "Unable to load orders.");
+        setOrders([]);
+        return;
+      }
+
       setOrders(
-        Array.isArray(data)
-          ? (data as ShopkeeperOrder[])
+        Array.isArray(result.orders)
+          ? (result.orders as ShopkeeperOrder[])
           : []
+      );
+    } catch (error) {
+      setError(
+        error instanceof Error
+          ? error.message
+          : "Unable to load orders."
+      );
+      setOrders([]);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function postAction(
+    action: string,
+    payload: Record<string, unknown> = {}
+  ) {
+    const response = await fetch(
+      "/api/shopkeeper/orders",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          action,
+          ...payload,
+        }),
+      }
+    );
+
+    const result = await response.json();
+
+    if (!response.ok) {
+      throw new Error(
+        result.error || "Unable to complete the order action."
       );
     }
 
-    setLoading(false);
+    return result;
   }
 
   useEffect(() => {
@@ -203,24 +245,25 @@ export default function ShopkeeperOrdersPage() {
     setError("");
     setMessage("");
 
-    const { error: rpcError } =
-      await supabase.rpc(
-        "prepare_instant_order",
-        {
-          p_order_id: order.order_id,
-        }
-      );
+    try {
+      await postAction("prepare", {
+        orderId: order.order_id,
+      });
 
-    if (rpcError) {
-      setError(rpcError.message);
-    } else {
       setMessage(
         `Token ${order.token_code} এখন preparing status-এ আছে।`
       );
-      await loadOrders();
-    }
 
-    setWorkingId(null);
+      await loadOrders();
+    } catch (error) {
+      setError(
+        error instanceof Error
+          ? error.message
+          : "Unable to start preparing."
+      );
+    } finally {
+      setWorkingId(null);
+    }
   }
 
   async function markReady(orderId: string) {
@@ -228,23 +271,22 @@ export default function ShopkeeperOrdersPage() {
     setError("");
     setMessage("");
 
-    const { error: rpcError } =
-      await supabase.rpc(
-        "update_shopkeeper_order_status",
-        {
-          p_order_id: orderId,
-          p_new_status: "ready",
-        }
-      );
+    try {
+      await postAction("ready", {
+        orderId,
+      });
 
-    if (rpcError) {
-      setError(rpcError.message);
-    } else {
       setMessage("Order successfully marked as ready.");
       await loadOrders();
+    } catch (error) {
+      setError(
+        error instanceof Error
+          ? error.message
+          : "Unable to mark order as ready."
+      );
+    } finally {
+      setWorkingId(null);
     }
-
-    setWorkingId(null);
   }
 
   async function payRemaining(order: ShopkeeperOrder) {
@@ -287,19 +329,13 @@ export default function ShopkeeperOrdersPage() {
     setError("");
     setMessage("");
 
-    const { error: rpcError } =
-      await supabase.rpc(
-        "mark_remaining_payment_paid",
-        {
-          p_order_id: order.order_id,
-          p_payment_method: method,
-          p_transaction_id: txId,
-        }
-      );
+    try {
+      await postAction("remaining", {
+        orderId: order.order_id,
+        paymentMethod: method,
+        transactionId: txId,
+      });
 
-    if (rpcError) {
-      setError(rpcError.message);
-    } else {
       setMessage(
         `Token ${order.token_code}-এর remaining payment recorded.`
       );
@@ -315,9 +351,15 @@ export default function ShopkeeperOrdersPage() {
       }));
 
       await loadOrders();
+    } catch (error) {
+      setError(
+        error instanceof Error
+          ? error.message
+          : "Unable to record remaining payment."
+      );
+    } finally {
+      setWorkingId(null);
     }
-
-    setWorkingId(null);
   }
 
   async function collectOrder(orderId: string) {
@@ -333,22 +375,22 @@ export default function ShopkeeperOrdersPage() {
     setError("");
     setMessage("");
 
-    const { error: rpcError } =
-      await supabase.rpc(
-        "collect_order",
-        {
-          p_order_id: orderId,
-        }
-      );
+    try {
+      await postAction("collect", {
+        orderId,
+      });
 
-    if (rpcError) {
-      setError(rpcError.message);
-    } else {
       setMessage("Order successfully collected.");
       await loadOrders();
+    } catch (error) {
+      setError(
+        error instanceof Error
+          ? error.message
+          : "Unable to collect order."
+      );
+    } finally {
+      setWorkingId(null);
     }
-
-    setWorkingId(null);
   }
 
   const confirmedCount = orders.filter(
@@ -386,7 +428,7 @@ export default function ShopkeeperOrdersPage() {
           <div className="flex gap-2">
             <button
               type="button"
-              onClick={loadOrders}
+              onClick={() => void loadOrders()}
               className="rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
             >
               Refresh

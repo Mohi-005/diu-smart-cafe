@@ -128,16 +128,21 @@ export default function ShopkeeperDashboard({
 
     setFoods(formattedFoods);
 
-    const { data: orderData, error: orderError } =
-      await supabase.rpc("get_shopkeeper_order_payment_data_v2");
+    const orderResponse = await fetch("/api/shopkeeper/orders", {
+      method: "GET",
+      cache: "no-store",
+    });
 
-    if (orderError) {
-      setErrorMessage(orderError.message);
-      setLoading(false);
-      return;
+    const orderResult = await orderResponse.json().catch(() => null);
+
+    if (!orderResponse.ok) {
+      throw new Error(
+        orderResult?.error ||
+          "Unable to load shopkeeper order data."
+      );
     }
 
-    setActiveOrderCount(orderData?.length ?? 0);
+    setActiveOrderCount(orderResult?.orders?.length ?? 0);
 
     const { data: paymentData, error: paymentError } =
       await supabase.rpc("get_pending_refund_payments_v2");
