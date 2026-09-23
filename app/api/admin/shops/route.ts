@@ -10,23 +10,72 @@ type ShopStatus =
   | "paused"
   | "hidden";
 
-type CreateShopBody = {
-  shopName?: string;
-  logoUrl?: string | null;
-  phoneNumber?: string | null;
-  bkashNumber?: string | null;
-  email?: string;
-  password?: string;
-};
+const CAFE_LOGO_BUCKET = "food-images";
+const MAX_CAFE_LOGO_SIZE = 5 * 1024 * 1024;
 
-type UpdateShopBody = {
-  shopId?: string;
-  name?: string;
-  logoUrl?: string | null;
-  phoneNumber?: string | null;
-  bkashNumber?: string | null;
-  status?: ShopStatus;
-};
+function getSafeFileName(fileName: string) {
+  const safeName = fileName
+    .toLowerCase()
+    .replace(/[^a-z0-9.-]/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "");
+
+  return safeName || "cafe-logo";
+}
+
+function validateLogoFile(value: FormDataEntryValue | null) {
+  if (!(value instanceof File) || value.size === 0) {
+    throw new Error("Cafe logo image is required.");
+  }
+
+  if (!value.type.startsWith("image/")) {
+    throw new Error("Please upload a valid image file for the cafe logo.");
+  }
+
+  if (value.size > MAX_CAFE_LOGO_SIZE) {
+    throw new Error("Cafe logo image size must be 5 MB or less.");
+  }
+
+  return value;
+}
+
+async function uploadCafeLogo(
+  serviceSupabase: SupabaseClient,
+  cafeId: string,
+  file: File
+) {
+  const filePath = `cafe-logos/${cafeId}/${crypto.randomUUID()}-${getSafeFileName(file.name)}`;
+
+  const { error: uploadError } = await serviceSupabase.storage
+    .from(CAFE_LOGO_BUCKET)
+    .upload(filePath, file, {
+      cacheControl: "3600",
+      contentType: file.type,
+      upsert: false,
+    });
+
+  if (uploadError) {
+    throw new Error(
+      `Cafe logo upload failed: ${uploadError.message}`
+    );
+  }
+
+  const { data: publicUrlData } = serviceSupabase.storage
+    .from(CAFE_LOGO_BUCKET)
+    .getPublicUrl(filePath);
+
+  if (!publicUrlData?.publicUrl) {
+    await serviceSupabase.storage
+      .from(CAFE_LOGO_BUCKET)
+      .remove([filePath]);
+    throw new Error("Unable to create a public URL for the cafe logo.");
+  }
+
+  return {
+    filePath,
+    publicUrl: publicUrlData.publicUrl,
+  };
+}
 
 function getServiceClient(): SupabaseClient {
   const supabaseUrl =
@@ -220,216 +269,117 @@ export async function GET() {
 export async function POST(
   request: Request
 ) {
-  let createdUserId:
-    | string
-    | null = null;
+  let createdUserId: string | null = null;
+  let createdCafeId: string | null = null;
+  let uploadedLogoPath: string | null = null;
 
   try {
-    const admin =
-      await getCurrentAdmin();
+    const admin = await getCurrentAdmin();
 
     if (admin.error) {
       return NextResponse.json(
-        {
-          error:
-            admin.error,
-        },
-        {
-          status:
-            admin.status,
-        }
+        { error: admin.error },
+        { status: admin.status }
       );
     }
 
-    const body =
-      (await request.json()) as CreateShopBody;
+    const formData = await request.formData();
 
-    const shopName =
-      body.shopName?.trim() ||
-      "";
-
-    const logoUrl =
-      body.logoUrl?.trim() ||
-      null;
-
-    const phoneNumber =
-      body.phoneNumber?.trim() ||
-      null;
-
-    const bkashNumber =
-      body.bkashNumber?.trim() ||
-      null;
-
-    const email =
-      body.email
-        ?.trim()
-        .toLowerCase() ||
-      "";
-
-    const password =
-      body.password ||
-      "";
+    const shopName = String(formData.get("shopName") ?? "").trim();
+    const phoneNumber = String(formData.get("phoneNumber") ?? "").trim() || null;
+    const bkashNumber = String(formData.get("bkashNumber") ?? "").trim() || null;
+    const email = String(formData.get("email") ?? "").trim().toLowerCase();
+    const password = String(formData.get("password") ?? "");
+    const logoFile = validateLogoFile(formData.get("logo"));
 
     if (!shopName) {
       return NextResponse.json(
-        {
-          error:
-            "Shop name is required.",
-        },
-        {
-          status: 400,
-        }
+        { error: "Shop name is required." },
+        { status: 400 }
       );
     }
 
     if (!email) {
       return NextResponse.json(
-        {
-          error:
-            "Shopkeeper email is required.",
-        },
-        {
-          status: 400,
-        }
+        { error: "Shopkeeper email is required." },
+        { status: 400 }
       );
     }
 
-    if (
-      password.length < 8
-    ) {
+    if (password.length < 8) {
       return NextResponse.json(
-        {
-          error:
-            "Password must contain at least 8 characters.",
-        },
-        {
-          status: 400,
-        }
+        { error: "Password must contain at least 8 characters." },
+        { status: 400 }
       );
     }
 
-    const serviceSupabase =
-      getServiceClient();
+    const serviceSupabase = getServiceClient();
 
     /* ---------------------------------------------------
        Create Auth account
     --------------------------------------------------- */
+    const { data: authData, error: authError } =
+      await serviceSupabase.auth.admin.createUser({
+        email,
+        password,
+        email_confirm: true,
+        user_metadata: {
+          role: "shopkeeper",
+          full_name: shopName,
+        },
+      });
 
-    const {
-      data: authData,
-      error: authError,
-    } =
-      await serviceSupabase
-        .auth.admin.createUser({
-          email,
-          password,
-          email_confirm: true,
-
-          user_metadata: {
-            role: "shopkeeper",
-            full_name:
-              shopName,
-          },
-        });
-
-    if (
-      authError ||
-      !authData.user
-    ) {
+    if (authError || !authData.user) {
       return NextResponse.json(
         {
           error:
             authError?.message ||
             "Unable to create shopkeeper account.",
         },
-        {
-          status: 400,
-        }
+        { status: 400 }
       );
     }
 
-    createdUserId =
-      authData.user.id;
+    createdUserId = authData.user.id;
 
     /* ---------------------------------------------------
        Profile
     --------------------------------------------------- */
-
-    const {
-      error:
-        profileError,
-    } =
-      await serviceSupabase
-        .from("profiles")
-        .upsert(
-          {
-            id:
-              createdUserId,
-            role:
-              "shopkeeper",
-            full_name:
-              shopName,
-          },
-          {
-            onConflict:
-              "id",
-          }
-        );
-
-    if (profileError) {
-      await serviceSupabase.auth.admin.deleteUser(
-        createdUserId
+    const { error: profileError } = await serviceSupabase
+      .from("profiles")
+      .upsert(
+        {
+          id: createdUserId,
+          role: "shopkeeper",
+          full_name: shopName,
+        },
+        { onConflict: "id" }
       );
 
-      return NextResponse.json(
-        {
-          error:
-            "Shopkeeper profile creation failed: " +
-            profileError.message,
-        },
-        {
-          status: 400,
-        }
+    if (profileError) {
+      throw new Error(
+        "Shopkeeper profile creation failed: " +
+          profileError.message
       );
     }
 
     /* ---------------------------------------------------
-       Cafe
+       Cafe row first so the storage path can use the real cafe ID.
     --------------------------------------------------- */
-
-    const {
-      data: cafe,
-      error: cafeError,
-    } =
-      await serviceSupabase
-        .from("cafes")
-        .insert({
-          name:
-            shopName,
-
-          logo_url:
-            logoUrl,
-
-          phone_number:
-            phoneNumber,
-
-          bkash_number:
-            bkashNumber,
-
-          owner_id:
-            createdUserId,
-
-          shopkeeper_id:
-            createdUserId,
-
-          status:
-            "active",
-
-          is_active:
-            true,
-        })
-        .select(
-          `
+    const { data: cafe, error: cafeError } = await serviceSupabase
+      .from("cafes")
+      .insert({
+        name: shopName,
+        logo_url: null,
+        phone_number: phoneNumber,
+        bkash_number: bkashNumber,
+        owner_id: createdUserId,
+        shopkeeper_id: createdUserId,
+        status: "active",
+        is_active: true,
+      })
+      .select(
+        `
           id,
           name,
           logo_url,
@@ -440,86 +390,100 @@ export async function POST(
           status,
           is_active,
           created_at
+        `
+      )
+      .single();
+
+    if (cafeError || !cafe) {
+      throw new Error(
+        "Shopkeeper account was created, but shop creation failed: " +
+          (cafeError?.message || "Unknown database error.")
+      );
+    }
+
+    createdCafeId = cafe.id as string;
+
+    /* ---------------------------------------------------
+       Upload logo and save the resulting public URL.
+       The existing food-images bucket is reused.
+    --------------------------------------------------- */
+    const uploadedLogo = await uploadCafeLogo(
+      serviceSupabase,
+      createdCafeId,
+      logoFile
+    );
+    uploadedLogoPath = uploadedLogo.filePath;
+
+    const { data: updatedCafe, error: logoUpdateError } =
+      await serviceSupabase
+        .from("cafes")
+        .update({ logo_url: uploadedLogo.publicUrl })
+        .eq("id", createdCafeId)
+        .select(
+          `
+            id,
+            name,
+            logo_url,
+            phone_number,
+            bkash_number,
+            owner_id,
+            shopkeeper_id,
+            status,
+            is_active,
+            created_at
           `
         )
         .single();
 
-    if (
-      cafeError ||
-      !cafe
-    ) {
-      await serviceSupabase
-        .from("profiles")
-        .delete()
-        .eq(
-          "id",
-          createdUserId
-        );
-
-      await serviceSupabase.auth.admin.deleteUser(
-        createdUserId
-      );
-
-      return NextResponse.json(
-        {
-          error:
-            "Shopkeeper account was created, but shop creation failed: " +
-            (
-              cafeError?.message ||
-              "Unknown database error."
-            ),
-        },
-        {
-          status: 400,
-        }
+    if (logoUpdateError || !updatedCafe) {
+      throw new Error(
+        "Cafe was created, but saving the cafe logo failed: " +
+          (logoUpdateError?.message || "Unknown database error.")
       );
     }
 
     return NextResponse.json(
       {
         success: true,
-
-        message:
-          "Shop and shopkeeper account created successfully.",
-
-        cafe,
-
+        message: "Shop and shopkeeper account created successfully.",
+        cafe: updatedCafe,
         shopkeeper: {
-          id:
-            createdUserId,
-
+          id: createdUserId,
           email,
-
-          role:
-            "shopkeeper",
+          role: "shopkeeper",
         },
       },
-      {
-        status: 201,
-      }
+      { status: 201 }
     );
   } catch (error) {
-    console.error(
-      "Admin shops POST error:",
-      error
-    );
+    console.error("Admin shops POST error:", error);
 
-    if (createdUserId) {
-      try {
-        const serviceSupabase =
-          getServiceClient();
+    try {
+      const serviceSupabase = getServiceClient();
 
-        await serviceSupabase.auth.admin.deleteUser(
-          createdUserId
-        );
-      } catch (
-        rollbackError
-      ) {
-        console.error(
-          "Shopkeeper Auth rollback error:",
-          rollbackError
-        );
+      if (uploadedLogoPath) {
+        await serviceSupabase.storage
+          .from(CAFE_LOGO_BUCKET)
+          .remove([uploadedLogoPath]);
       }
+
+      if (createdCafeId) {
+        await serviceSupabase
+          .from("cafes")
+          .delete()
+          .eq("id", createdCafeId);
+      }
+
+      if (createdUserId) {
+        await serviceSupabase
+          .from("profiles")
+          .delete()
+          .eq("id", createdUserId);
+
+        await serviceSupabase.auth.admin.deleteUser(createdUserId);
+      }
+    } catch (rollbackError) {
+      console.error("Admin shops POST rollback error:", rollbackError);
     }
 
     return NextResponse.json(
@@ -529,9 +493,7 @@ export async function POST(
             ? error.message
             : "Unable to create shop.",
       },
-      {
-        status: 500,
-      }
+      { status: 500 }
     );
   }
 }
@@ -544,159 +506,90 @@ export async function POST(
 export async function PATCH(
   request: Request
 ) {
+  let uploadedLogoPath: string | null = null;
+
   try {
-    const admin =
-      await getCurrentAdmin();
+    const admin = await getCurrentAdmin();
 
     if (admin.error) {
       return NextResponse.json(
-        {
-          error:
-            admin.error,
-        },
-        {
-          status:
-            admin.status,
-        }
+        { error: admin.error },
+        { status: admin.status }
       );
     }
 
-    const body =
-      (await request.json()) as UpdateShopBody;
+    const formData = await request.formData();
 
-    const shopId =
-      body.shopId?.trim() ||
-      "";
+    const shopId = String(formData.get("shopId") ?? "").trim();
+    const name = String(formData.get("name") ?? "").trim();
+    const phoneNumber = String(formData.get("phoneNumber") ?? "").trim();
+    const bkashNumber = String(formData.get("bkashNumber") ?? "").trim();
+    const statusValue = String(formData.get("status") ?? "").trim();
+    const logoValue = formData.get("logo");
 
     if (!shopId) {
       return NextResponse.json(
-        {
-          error:
-            "Shop ID is required.",
-        },
-        {
-          status: 400,
-        }
+        { error: "Shop ID is required." },
+        { status: 400 }
       );
     }
 
-    const serviceSupabase =
-      getServiceClient();
+    const serviceSupabase = getServiceClient();
 
-    const updateData: Record<
-      string,
-      unknown
-    > = {};
+    const updateData: Record<string, unknown> = {};
 
-    if (
-      typeof body.name ===
-      "string"
-    ) {
-      const name =
-        body.name.trim();
-
+    if (formData.has("name")) {
       if (!name) {
         return NextResponse.json(
-          {
-            error:
-              "Shop name cannot be empty.",
-          },
-          {
-            status: 400,
-          }
+          { error: "Shop name cannot be empty." },
+          { status: 400 }
         );
       }
-
-      updateData.name =
-        name;
+      updateData.name = name;
     }
 
-    if (
-      body.logoUrl !==
-      undefined
-    ) {
-      updateData.logo_url =
-        body.logoUrl
-          ?.trim() || null;
+    if (formData.has("phoneNumber")) {
+      updateData.phone_number = phoneNumber || null;
     }
 
-    if (
-      body.phoneNumber !==
-      undefined
-    ) {
-      updateData.phone_number =
-        body.phoneNumber
-          ?.trim() || null;
+    if (formData.has("bkashNumber")) {
+      updateData.bkash_number = bkashNumber || null;
     }
 
-    if (
-      body.bkashNumber !==
-      undefined
-    ) {
-      updateData.bkash_number =
-        body.bkashNumber
-          ?.trim() || null;
-    }
-
-    if (
-      body.status !==
-      undefined
-    ) {
-      if (
-        ![
-          "active",
-          "paused",
-          "hidden",
-        ].includes(
-          body.status
-        )
-      ) {
+    if (formData.has("status")) {
+      if (!(["active", "paused", "hidden"] as string[]).includes(statusValue)) {
         return NextResponse.json(
-          {
-            error:
-              "Invalid shop status.",
-          },
-          {
-            status: 400,
-          }
+          { error: "Invalid shop status." },
+          { status: 400 }
         );
       }
-
-      updateData.status =
-        body.status;
+      updateData.status = statusValue as ShopStatus;
     }
 
-    if (
-      Object.keys(
-        updateData
-      ).length === 0
-    ) {
+    if (logoValue instanceof File && logoValue.size > 0) {
+      const logoFile = validateLogoFile(logoValue);
+      const uploadedLogo = await uploadCafeLogo(
+        serviceSupabase,
+        shopId,
+        logoFile
+      );
+      uploadedLogoPath = uploadedLogo.filePath;
+      updateData.logo_url = uploadedLogo.publicUrl;
+    }
+
+    if (Object.keys(updateData).length === 0) {
       return NextResponse.json(
-        {
-          error:
-            "No shop changes were provided.",
-        },
-        {
-          status: 400,
-        }
+        { error: "No shop changes were provided." },
+        { status: 400 }
       );
     }
 
-    const {
-      data: cafe,
-      error,
-    } =
-      await serviceSupabase
-        .from("cafes")
-        .update(
-          updateData
-        )
-        .eq(
-          "id",
-          shopId
-        )
-        .select(
-          `
+    const { data: cafe, error } = await serviceSupabase
+      .from("cafes")
+      .update(updateData)
+      .eq("id", shopId)
+      .select(
+        `
           id,
           name,
           logo_url,
@@ -707,35 +600,46 @@ export async function PATCH(
           status,
           is_active,
           created_at
-          `
-        )
-        .single();
+        `
+      )
+      .single();
 
     if (error) {
+      if (uploadedLogoPath) {
+        await serviceSupabase.storage
+          .from(CAFE_LOGO_BUCKET)
+          .remove([uploadedLogoPath]);
+      }
+
       return NextResponse.json(
-        {
-          error:
-            error.message,
-        },
-        {
-          status: 400,
-        }
+        { error: error.message },
+        { status: 400 }
       );
     }
 
+    uploadedLogoPath = null;
+
     return NextResponse.json({
       success: true,
-
-      message:
-        "Shop updated successfully.",
-
+      message: "Shop updated successfully.",
       cafe,
     });
   } catch (error) {
-    console.error(
-      "Admin shops PATCH error:",
-      error
-    );
+    console.error("Admin shops PATCH error:", error);
+
+    if (uploadedLogoPath) {
+      try {
+        const serviceSupabase = getServiceClient();
+        await serviceSupabase.storage
+          .from(CAFE_LOGO_BUCKET)
+          .remove([uploadedLogoPath]);
+      } catch (rollbackError) {
+        console.error(
+          "Admin shops PATCH logo rollback error:",
+          rollbackError
+        );
+      }
+    }
 
     return NextResponse.json(
       {
@@ -744,9 +648,7 @@ export async function PATCH(
             ? error.message
             : "Unable to update shop.",
       },
-      {
-        status: 500,
-      }
+      { status: 500 }
     );
   }
 }

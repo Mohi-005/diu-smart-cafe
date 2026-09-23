@@ -1,15 +1,6 @@
 import Link from "next/link";
-
 import { createClient } from "@/lib/supabase/server";
 import StudentHeader from "@/components/student/StudentHeader";
-
-type Cafe = {
-  id: string;
-  name: string;
-  description: string | null;
-  location: string | null;
-  logo_url: string | null;
-};
 
 export default async function CafesPage() {
   const supabase = await createClient();
@@ -19,33 +10,31 @@ export default async function CafesPage() {
   } = await supabase.auth.getUser();
 
   let fullName: string | null = null;
+  let role: "student" | "shopkeeper" | "admin" | null = null;
 
   if (user) {
     const { data: profile } = await supabase
       .from("profiles")
-      .select("full_name")
+      .select("full_name, role")
       .eq("id", user.id)
       .maybeSingle();
 
     fullName = profile?.full_name ?? null;
+    role = (profile?.role as "student" | "shopkeeper" | "admin" | null) ?? null;
   }
 
-  const { data: cafeData, error } = await supabase
+  const { data: cafes, error } = await supabase
     .from("cafes")
-    .select(
-      "id, name, description, location, logo_url"
-    )
-    .eq("status", "active")
+    .select("id, name, description, location, logo_url")
     .eq("is_active", true)
-    .order("name", { ascending: true });
-
-  const cafes = (cafeData ?? []) as Cafe[];
+    .order("name");
 
   return (
     <main className="min-h-screen bg-slate-50 text-slate-900">
       <StudentHeader
         fullName={fullName}
         email={user?.email}
+        role={role}
       />
 
       <div className="mx-auto max-w-7xl px-5 py-12 lg:px-8">
@@ -72,7 +61,7 @@ export default async function CafesPage() {
 
             <p className="mt-2">{error.message}</p>
           </div>
-        ) : cafes.length === 0 ? (
+        ) : !cafes || cafes.length === 0 ? (
           <div className="mt-10 rounded-2xl border border-slate-200 bg-white p-10 text-center">
             <p className="text-lg font-bold text-slate-950">
               No Active Cafe Available
@@ -90,15 +79,15 @@ export default async function CafesPage() {
                 className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm transition hover:-translate-y-1 hover:shadow-xl sm:p-7"
               >
                 <div className="flex items-start justify-between gap-5">
-                  <div className="flex h-14 w-14 items-center justify-center overflow-hidden rounded-2xl bg-emerald-50 text-2xl">
+                  <div className="flex h-24 w-24 items-center justify-center overflow-hidden rounded-2xl border border-slate-200 bg-emerald-50 text-3xl">
                     {cafe.logo_url ? (
                       <img
                         src={cafe.logo_url}
                         alt={`${cafe.name} logo`}
-                        className="h-full w-full object-cover"
+                        className="h-full w-full object-contain p-2"
                       />
                     ) : (
-                      <span aria-hidden="true">🍽️</span>
+                      "🍽️"
                     )}
                   </div>
 
@@ -123,7 +112,7 @@ export default async function CafesPage() {
                 )}
 
                 <Link
-                  href={`/menu?cafe=${encodeURIComponent(cafe.id)}`}
+                  href={`/menu?cafe=${cafe.id}`}
                   className="mt-7 block rounded-xl bg-slate-900 px-5 py-3.5 text-center text-sm font-bold text-white transition hover:bg-slate-800"
                 >
                   View Menu

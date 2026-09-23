@@ -30,11 +30,36 @@ type Food = {
   cafe_name: string;
 };
 
+type Recommendation = {
+  food_id: string;
+  food_name: string;
+  food_price: number;
+  food_image_url: string | null;
+  food_is_available: boolean;
+  cafe_id: string;
+  cafe_name: string;
+  total_sold: number;
+};
+
+function isRecommendationWindowOpen() {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "Asia/Dhaka",
+    hour: "numeric",
+    hourCycle: "h23",
+  }).formatToParts(new Date());
+
+  const hour = Number(
+    parts.find((part) => part.type === "hour")?.value ?? "0"
+  );
+
+  return hour >= 6 && hour < 24;
+}
+
 export default async function Home() {
   const supabase = await createClient();
 
   // ---------------------------------------------------------
-  // Load active cafes dynamically from database
+  // Load active cafes dynamically
   // ---------------------------------------------------------
   const { data: cafeData, error: cafesError } = await supabase
     .from("cafes")
@@ -47,7 +72,7 @@ export default async function Home() {
   const cafes = (cafeData ?? []) as Cafe[];
 
   // ---------------------------------------------------------
-  // Load active food items dynamically
+  // Load food cards for the home page
   // ---------------------------------------------------------
   let foods: Food[] = [];
 
@@ -88,22 +113,60 @@ export default async function Home() {
         id: item.id,
         name: item.name,
         price: Number(item.price),
-        discount_percentage: Number(item.discount_percentage ?? 0),
+        discount_percentage: Number(
+          item.discount_percentage ?? 0
+        ),
         image_url: item.image_url,
         is_available: item.is_available,
         cafe_id: item.cafe_id,
-        category_name: categoryData?.name ?? "Uncategorized",
+        category_name:
+          categoryData?.name ?? "Uncategorized",
         cafe_name:
           cafeNameMap.get(item.cafe_id) ?? "Campus Cafe",
       };
     });
   }
 
+  // ---------------------------------------------------------
+  // Load REAL best-selling recommendation
+  // ---------------------------------------------------------
+  const recommendationWindowOpen =
+    isRecommendationWindowOpen();
+
+  const {
+    data: recommendationData,
+    error: recommendationError,
+  } = recommendationWindowOpen
+    ? await supabase.rpc("get_today_recommendation")
+    : { data: null, error: null };
+
+  const recommendationRow =
+    Array.isArray(recommendationData) &&
+    recommendationData.length > 0
+      ? (recommendationData[0] as Recommendation)
+      : null;
+
+  const heroRecommendation = recommendationRow
+    ? {
+        id: recommendationRow.food_id,
+        name: recommendationRow.food_name,
+        price: Number(recommendationRow.food_price),
+        imageUrl: recommendationRow.food_image_url,
+        cafeId: recommendationRow.cafe_id,
+        cafeName: recommendationRow.cafe_name,
+        available: recommendationRow.food_is_available,
+      }
+    : null;
+
   return (
     <main className="min-h-screen bg-white text-slate-900">
       <Navbar />
 
-      <Hero />
+      {/* Hero + Real Best-Selling Recommendation */}
+      <Hero
+        recommendation={heroRecommendation}
+        recommendationEnabled={recommendationWindowOpen}
+      />
 
       {/* Cafe Section */}
       <section
@@ -122,8 +185,8 @@ export default async function Home() {
               </h2>
 
               <p className="mt-4 text-base leading-7 text-slate-600">
-                Check different food points around campus before placing
-                your order.
+                Check different food points around campus before
+                placing your order.
               </p>
             </div>
 
@@ -138,7 +201,9 @@ export default async function Home() {
 
           {cafesError ? (
             <div className="mt-10 rounded-2xl border border-red-200 bg-red-50 p-6 text-red-700">
-              <p className="font-bold">Unable to load cafes.</p>
+              <p className="font-bold">
+                Unable to load cafes.
+              </p>
 
               <p className="mt-2 text-sm">
                 {cafesError.message}
@@ -224,7 +289,9 @@ export default async function Home() {
                   cafeId={food.cafe_id}
                   available={food.is_available}
                   imageUrl={food.image_url}
-                  discountPercentage={food.discount_percentage}
+                  discountPercentage={
+                    food.discount_percentage
+                  }
                 />
               ))}
             </div>

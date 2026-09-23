@@ -1,6 +1,168 @@
-import Link from "next/link";
+"use client";
 
-export default function Hero() {
+import Link from "next/link";
+import { useEffect, useState } from "react";
+import { createClient } from "@/lib/supabase/client";
+
+
+type Recommendation = {
+  id: string;
+  name: string;
+  price: number;
+  cafeId: string;
+  cafeName: string;
+  imageUrl?: string | null;
+  available?: boolean;
+};
+
+type RecommendationRow = {
+  food_id: string;
+  food_name: string;
+  food_price: number;
+  food_image_url: string | null;
+  food_is_available: boolean;
+  cafe_id: string;
+  cafe_name: string;
+};
+
+type HeroProps = {
+  recommendation?: Recommendation | null;
+  recommendationEnabled?: boolean;
+};
+
+const supabase = createClient();
+
+function isRecommendationWindowOpen() {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "Asia/Dhaka",
+    hour: "numeric",
+    hourCycle: "h23",
+  }).formatToParts(new Date());
+
+  const hour = Number(
+    parts.find((part) => part.type === "hour")?.value ?? "0"
+  );
+
+  return hour >= 6 && hour < 24;
+}
+
+function mapRecommendation(
+  row: RecommendationRow | null
+): Recommendation | null {
+  if (!row) {
+    return null;
+  }
+
+  return {
+    id: row.food_id,
+    name: row.food_name,
+    price: Number(row.food_price),
+    imageUrl: row.food_image_url,
+    cafeId: row.cafe_id,
+    cafeName: row.cafe_name,
+    available: row.food_is_available,
+  };
+}
+
+function getRecommendationRow(data: unknown) {
+  if (!Array.isArray(data) || data.length === 0) {
+    return null;
+  }
+
+  return (data[0] ?? null) as RecommendationRow | null;
+}
+
+export default function Hero({
+  recommendation = null,
+  recommendationEnabled = true,
+}: HeroProps) {
+  const [showRecommendation, setShowRecommendation] = useState(
+    recommendationEnabled && isRecommendationWindowOpen()
+  );
+
+  const [liveRecommendation, setLiveRecommendation] = useState<
+    Recommendation | null
+  >(recommendation);
+
+  useEffect(() => {
+    let cancelled = false;
+    let previousWindowState =
+      recommendationEnabled && isRecommendationWindowOpen();
+
+    async function syncRecommendation() {
+      const currentWindowState = isRecommendationWindowOpen();
+
+      if (cancelled) {
+        return;
+      }
+
+      setShowRecommendation(currentWindowState);
+
+      if (!currentWindowState) {
+        setLiveRecommendation(null);
+      } else {
+        const { data, error } = await supabase.rpc(
+          "get_today_recommendation"
+        );
+
+        if (!cancelled && !error) {
+          const row = getRecommendationRow(data);
+          setLiveRecommendation(mapRecommendation(row));
+        }
+      }
+
+      previousWindowState = currentWindowState;
+    }
+
+    setShowRecommendation(previousWindowState);
+
+    if (previousWindowState) {
+      void syncRecommendation();
+    }
+
+    const timer = window.setInterval(() => {
+      if (document.visibilityState === "visible") {
+        void syncRecommendation();
+      }
+    }, 1000);
+
+    const visibilityHandler = () => {
+      if (document.visibilityState === "visible") {
+        void syncRecommendation();
+      }
+    };
+
+    document.addEventListener(
+      "visibilitychange",
+      visibilityHandler
+    );
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+      document.removeEventListener(
+        "visibilitychange",
+        visibilityHandler
+      );
+    };
+  }, [recommendationEnabled]);
+
+  useEffect(() => {
+    if (recommendation) {
+      setLiveRecommendation(recommendation);
+    }
+  }, [recommendation]);
+
+  const activeRecommendation = showRecommendation
+    ? liveRecommendation
+    : null;
+
+  const recommendationHref = activeRecommendation
+    ? `/menu?cafe=${encodeURIComponent(
+        activeRecommendation.cafeId
+      )}&item=${encodeURIComponent(activeRecommendation.id)}`
+    : "/menu";
+
   return (
     <section className="overflow-hidden bg-slate-50">
       <div className="mx-auto grid max-w-7xl gap-12 px-5 py-16 sm:py-20 lg:grid-cols-[1.1fr_0.9fr] lg:gap-16 lg:px-8 lg:py-24">
@@ -35,7 +197,7 @@ export default function Hero() {
 
             <Link
               href="/cafes"
-              className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-300 bg-white px-6 py-3.5 text-center text-sm font-bold text-slate-700 transition duration-200 hover:border-slate-400 hover:bg-slate-50"
+              className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-300 bg-white px-6 py-3.5 text-center text-sm font-bold text-slate-700 transition hover:border-slate-400 hover:bg-slate-50"
             >
               Explore Cafes
               <span aria-hidden="true">→</span>
@@ -71,7 +233,17 @@ export default function Hero() {
         <div className="relative flex items-center justify-center">
           <div className="absolute h-64 w-64 rounded-full bg-emerald-200/60 blur-3xl sm:h-72 sm:w-72" />
 
-          <div className="relative w-full max-w-md rounded-3xl border border-slate-200 bg-white p-4 shadow-2xl shadow-slate-200/70 sm:p-5">
+          <Link
+            href={recommendationHref}
+            aria-label={
+              activeRecommendation
+                ? `Open ${activeRecommendation.name} in the menu`
+                : showRecommendation
+                  ? "Open today's recommendation in the menu"
+                  : "Today's recommendation is waiting until morning"
+            }
+            className="relative block w-full max-w-md rounded-3xl border border-slate-200 bg-white p-4 shadow-2xl shadow-slate-200/70 transition hover:-translate-y-1 hover:border-emerald-200 hover:shadow-emerald-100 sm:p-5"
+          >
             {/* Food Recommendation */}
             <div className="rounded-2xl bg-gradient-to-br from-emerald-600 to-emerald-800 p-6 text-white sm:p-7">
               <div className="flex items-center justify-between gap-3">
@@ -80,30 +252,55 @@ export default function Hero() {
                 </p>
 
                 <span className="rounded-full bg-white/10 px-2.5 py-1 text-[10px] font-bold text-emerald-50 backdrop-blur">
-                  Live
+                  {showRecommendation ? "Live" : "Waiting"}
                 </span>
               </div>
 
-              <div className="mt-7 flex h-20 w-20 items-center justify-center rounded-2xl bg-white/10 text-5xl backdrop-blur sm:h-24 sm:w-24 sm:text-6xl">
-                🍛
+              <div className="mt-7 flex h-20 w-20 items-center justify-center overflow-hidden rounded-2xl bg-white/10 text-5xl backdrop-blur sm:h-24 sm:w-24 sm:text-6xl">
+                {activeRecommendation?.imageUrl ? (
+                  <img
+                    src={activeRecommendation.imageUrl}
+                    alt={activeRecommendation.name}
+                    className="h-full w-full object-cover"
+                  />
+                ) : (
+                  "🍛"
+                )}
               </div>
 
               <h2 className="mt-5 text-2xl font-extrabold tracking-tight sm:text-3xl">
-                Chicken Biryani
+                {activeRecommendation?.name ??
+                  (showRecommendation
+                    ? "Today&apos;s Recommendation"
+                    : "Waiting for Morning")}
               </h2>
 
               <p className="mt-2 text-sm text-emerald-100">
-                Main Cafeteria
+                {activeRecommendation?.cafeName ??
+                  (showRecommendation
+                    ? "Explore DIU cafes"
+                    : "Recommendation starts at 6:00 AM")}
               </p>
 
               <div className="mt-6 flex items-end justify-between gap-4">
                 <div>
                   <p className="text-xs text-emerald-100">Price</p>
-                  <p className="mt-1 text-xl font-black">৳120</p>
+
+                  <p className="mt-1 text-xl font-black">
+                    {activeRecommendation
+                      ? `৳${activeRecommendation.price.toFixed(2)}`
+                      : "—"}
+                  </p>
                 </div>
 
                 <span className="rounded-full bg-white/15 px-3 py-1.5 text-xs font-bold backdrop-blur">
-                  Available
+                  {activeRecommendation
+                    ? activeRecommendation.available === false
+                      ? "Unavailable"
+                      : "Available"
+                    : showRecommendation
+                      ? "Browse"
+                      : "Waiting"}
                 </span>
               </div>
             </div>
@@ -112,25 +309,27 @@ export default function Hero() {
             <div className="mt-4 grid grid-cols-2 gap-3 rounded-2xl bg-slate-50 p-4">
               <div>
                 <p className="text-[11px] font-medium text-slate-500">
-                  Estimated pickup
+                  Order flow
                 </p>
 
                 <p className="mt-1 text-sm font-black text-slate-900 sm:text-base">
-                  12:45 PM
+                  {showRecommendation
+                    ? "View Menu"
+                    : "Come back at 6:00 AM"}
                 </p>
               </div>
 
               <div className="text-right">
                 <p className="text-[11px] font-medium text-slate-500">
-                  Digital token
+                  Next step
                 </p>
 
                 <span className="mt-1 inline-flex rounded-xl bg-slate-900 px-3 py-2 text-xs font-bold text-white">
-                  Token #A24
+                  {showRecommendation ? "Order →" : "Wait →"}
                 </span>
               </div>
             </div>
-          </div>
+          </Link>
         </div>
       </div>
     </section>

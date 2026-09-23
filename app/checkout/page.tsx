@@ -50,6 +50,30 @@ export default function CheckoutPage() {
         return;
       }
 
+      const { data: profile } = await supabase
+        .from("profiles")
+        .select("role, is_frozen")
+        .eq("id", user.id)
+        .maybeSingle();
+
+      if (profile?.role === "shopkeeper") {
+        router.replace("/shopkeeper");
+        return;
+      }
+
+      if (profile?.role === "admin") {
+        router.replace("/admin");
+        return;
+      }
+
+      if (
+        profile?.role !== "student" ||
+        profile.is_frozen === true
+      ) {
+        router.replace("/login?redirect=/checkout");
+        return;
+      }
+
       setCheckingAuth(false);
     }
 
@@ -129,10 +153,15 @@ export default function CheckoutPage() {
 
       /*
        * Step 1:
-       * Create the normal order on the server.
+       * Create the order through the secure student-only wrapper.
+       *
+       * This wrapper verifies:
+       * - authenticated user
+       * - student role
+       * - student is not frozen
        */
       const { data, error } = await supabase.rpc(
-        "create_pending_order",
+        "create_pending_order_secure",
         {
           p_cafe_id: cafeId,
           p_items: cartItems,
@@ -186,7 +215,8 @@ export default function CheckoutPage() {
       }
 
       /*
-       * Only clear the cart after both server operations succeed.
+       * Only clear the local cart after all server-side
+       * operations succeed.
        */
       clearCart();
 
@@ -194,7 +224,10 @@ export default function CheckoutPage() {
         `/payment?order=${encodeURIComponent(result.order_id)}`
       );
     } catch (error) {
-      console.error("Checkout order creation error:", error);
+      console.error(
+        "Checkout order creation error:",
+        error
+      );
 
       setErrorMessage(
         error instanceof Error
@@ -277,7 +310,7 @@ export default function CheckoutPage() {
                 <button
                   type="button"
                   onClick={() => setOrderType("preorder")}
-                  className={`text-left rounded-2xl border-2 p-5 transition ${
+                  className={`rounded-2xl border-2 p-5 text-left transition ${
                     orderType === "preorder"
                       ? "border-emerald-500 bg-emerald-50"
                       : "border-slate-200 bg-white hover:border-slate-300"
@@ -321,7 +354,7 @@ export default function CheckoutPage() {
                 <button
                   type="button"
                   onClick={() => setOrderType("instant")}
-                  className={`text-left rounded-2xl border-2 p-5 transition ${
+                  className={`rounded-2xl border-2 p-5 text-left transition ${
                     orderType === "instant"
                       ? "border-blue-500 bg-blue-50"
                       : "border-slate-200 bg-white hover:border-slate-300"

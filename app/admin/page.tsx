@@ -94,8 +94,11 @@ export default function AdminPage() {
   const [editCafeName, setEditCafeName] =
     useState("");
 
-  const [editLogoUrl, setEditLogoUrl] =
-    useState("");
+  const [editLogoFile, setEditLogoFile] =
+    useState<File | null>(null);
+
+  const [editLogoPreview, setEditLogoPreview] =
+    useState<string | null>(null);
 
   const [editPhoneNumber, setEditPhoneNumber] =
     useState("");
@@ -413,9 +416,12 @@ export default function AdminPage() {
       cafe.name
     );
 
-    setEditLogoUrl(
-      cafe.logo_url ?? ""
-    );
+    if (editLogoPreview?.startsWith("blob:")) {
+      URL.revokeObjectURL(editLogoPreview);
+    }
+
+    setEditLogoFile(null);
+    setEditLogoPreview(cafe.logo_url ?? null);
 
     setEditPhoneNumber(
       cafe.phone_number ?? ""
@@ -432,10 +438,41 @@ export default function AdminPage() {
   function cancelCafeEdit() {
     setEditingCafeId(null);
 
+    if (editLogoPreview?.startsWith("blob:")) {
+      URL.revokeObjectURL(editLogoPreview);
+    }
+
     setEditCafeName("");
-    setEditLogoUrl("");
+    setEditLogoFile(null);
+    setEditLogoPreview(null);
     setEditPhoneNumber("");
     setEditBkashNumber("");
+  }
+
+  function handleEditLogoChange(file: File | null) {
+    setCafeError("");
+
+    if (!file) {
+      setEditLogoFile(null);
+      return;
+    }
+
+    if (!file.type.startsWith("image/")) {
+      setCafeError("Please select a valid cafe logo image.");
+      return;
+    }
+
+    if (file.size > 5 * 1024 * 1024) {
+      setCafeError("Cafe logo image size must be 5 MB or less.");
+      return;
+    }
+
+    if (editLogoPreview?.startsWith("blob:")) {
+      URL.revokeObjectURL(editLogoPreview);
+    }
+
+    setEditLogoFile(file);
+    setEditLogoPreview(URL.createObjectURL(file));
   }
 
   async function saveCafeEdit(
@@ -458,30 +495,22 @@ export default function AdminPage() {
     setCafeMessage("");
 
     try {
+      const formData = new FormData();
+      formData.append("shopId", cafeId);
+      formData.append("name", editCafeName.trim());
+      formData.append("phoneNumber", editPhoneNumber.trim());
+      formData.append("bkashNumber", editBkashNumber.trim());
+
+      if (editLogoFile) {
+        formData.append("logo", editLogoFile);
+      }
+
       const response =
         await fetch(
           "/api/admin/shops",
           {
             method: "PATCH",
-            headers: {
-              "Content-Type":
-                "application/json",
-            },
-            body: JSON.stringify({
-              shopId:
-                cafeId,
-              name:
-                editCafeName.trim(),
-              logoUrl:
-                editLogoUrl.trim() ||
-                null,
-              phoneNumber:
-                editPhoneNumber.trim() ||
-                null,
-              bkashNumber:
-                editBkashNumber.trim() ||
-                null,
-            }),
+            body: formData,
           }
         );
 
@@ -550,20 +579,16 @@ export default function AdminPage() {
     setCafeMessage("");
 
     try {
+      const formData = new FormData();
+      formData.append("shopId", cafe.id);
+      formData.append("status", status);
+
       const response =
         await fetch(
           "/api/admin/shops",
           {
             method: "PATCH",
-            headers: {
-              "Content-Type":
-                "application/json",
-            },
-            body: JSON.stringify({
-              shopId:
-                cafe.id,
-              status,
-            }),
+            body: formData,
           }
         );
 
@@ -1136,7 +1161,22 @@ export default function AdminPage() {
                           className="rounded-2xl border border-slate-200 bg-slate-50 p-5"
                         >
                           <div className="flex flex-col gap-5 xl:flex-row xl:items-start xl:justify-between">
-                            <div className="min-w-0">
+                            <div className="flex min-w-0 flex-col gap-5 sm:flex-row">
+                              <div className="flex h-24 w-24 shrink-0 items-center justify-center overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+                                {cafe.logo_url ? (
+                                  <img
+                                    src={cafe.logo_url}
+                                    alt={`${cafe.name} logo`}
+                                    className="h-full w-full object-contain p-2"
+                                  />
+                                ) : (
+                                  <span className="text-4xl" aria-hidden="true">
+                                    🍽️
+                                  </span>
+                                )}
+                              </div>
+
+                              <div className="min-w-0">
                               <div className="flex flex-wrap items-center gap-2">
                                 <h4 className="text-xl font-black text-slate-950">
                                   {
@@ -1197,6 +1237,7 @@ export default function AdminPage() {
                                     "Not assigned"}
                                 </p>
                               </div>
+                            </div>
                             </div>
 
                             <div className="flex flex-wrap gap-2">
@@ -1337,21 +1378,40 @@ export default function AdminPage() {
                                   className="rounded-xl border border-slate-300 px-4 py-3 text-sm"
                                 />
 
-                                <input
-                                  value={
-                                    editLogoUrl
-                                  }
-                                  onChange={(
-                                    event
-                                  ) =>
-                                    setEditLogoUrl(
-                                      event.target
-                                        .value
-                                    )
-                                  }
-                                  placeholder="Logo URL"
-                                  className="rounded-xl border border-slate-300 px-4 py-3 text-sm"
-                                />
+                                <div className="md:col-span-2">
+                                  <label
+                                    htmlFor={`edit-logo-${cafe.id}`}
+                                    className="mb-2 block text-sm font-bold text-slate-700"
+                                  >
+                                    Cafe Logo Image
+                                  </label>
+
+                                  <input
+                                    id={`edit-logo-${cafe.id}`}
+                                    type="file"
+                                    accept="image/png,image/jpeg,image/webp"
+                                    onChange={(event) =>
+                                      handleEditLogoChange(
+                                        event.target.files?.[0] ?? null
+                                      )
+                                    }
+                                    className="block w-full rounded-xl border border-slate-300 bg-white text-sm text-slate-500 file:mr-4 file:border-0 file:bg-slate-100 file:px-4 file:py-3 file:text-sm file:font-semibold file:text-slate-700"
+                                  />
+
+                                  <p className="mt-2 text-xs text-slate-400">
+                                    JPG, PNG or WebP. Maximum 5 MB. নতুন ছবি দিলে existing cafe logo replace হবে।
+                                  </p>
+
+                                  {editLogoPreview && (
+                                    <div className="mt-4 flex h-32 w-32 items-center justify-center overflow-hidden rounded-2xl border border-slate-200 bg-slate-50">
+                                      <img
+                                        src={editLogoPreview}
+                                        alt={`${cafe.name} logo preview`}
+                                        className="h-full w-full object-contain p-2"
+                                      />
+                                    </div>
+                                  )}
+                                </div>
                               </div>
 
                               <div className="mt-5 flex gap-2">

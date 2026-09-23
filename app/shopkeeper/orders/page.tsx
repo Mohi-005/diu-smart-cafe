@@ -1,16 +1,20 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { createClient } from "@/lib/supabase/client";
 
 type ShopkeeperOrder = {
   order_id: string;
   token_code: string;
+  food_names?: string | null;
   cafe_id: string;
   status: string;
   total_amount: number;
   advance_paid: number;
   remaining_due: number;
   created_at: string;
+  student_name?: string | null;
+  student_phone?: string | null;
   cancellation_deadline_at?: string | null;
 
   advance_payment_id?: string | null;
@@ -23,6 +27,7 @@ type ShopkeeperOrder = {
   remaining_payment_status?: string | null;
 };
 
+const supabase = createClient();
 
 function formatTime(seconds: number) {
   const safe = Math.max(seconds, 0);
@@ -76,82 +81,65 @@ export default function ShopkeeperOrdersPage() {
     null
   );
 
-  async function loadOrders() {
-    setLoading(true);
+  async function loadOrders(showLoading = false) {
+    if (showLoading) {
+      setLoading(true);
+    }
+
     setError("");
 
-    try {
-      const response = await fetch(
-        "/api/shopkeeper/orders",
-        {
-          method: "GET",
-          cache: "no-store",
-        }
+    const { data, error: loadError } =
+      await supabase.rpc(
+        "get_shopkeeper_active_order_payment_data_v3"
       );
 
-      const result = await response.json();
-
-      if (!response.ok) {
-        setError(result.error || "Unable to load orders.");
-        setOrders([]);
-        return;
-      }
-
+    if (loadError) {
+      setError(loadError.message);
+      setOrders([]);
+    } else {
       setOrders(
-        Array.isArray(result.orders)
-          ? (result.orders as ShopkeeperOrder[])
+        Array.isArray(data)
+          ? (data as ShopkeeperOrder[])
           : []
       );
-    } catch (error) {
-      setError(
-        error instanceof Error
-          ? error.message
-          : "Unable to load orders."
-      );
-      setOrders([]);
-    } finally {
+    }
+
+    if (showLoading) {
       setLoading(false);
     }
   }
 
-  async function postAction(
-    action: string,
-    payload: Record<string, unknown> = {}
-  ) {
-    const response = await fetch(
-      "/api/shopkeeper/orders",
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          action,
-          ...payload,
-        }),
-      }
-    );
-
-    const result = await response.json();
-
-    if (!response.ok) {
-      throw new Error(
-        result.error || "Unable to complete the order action."
-      );
-    }
-
-    return result;
-  }
-
   useEffect(() => {
-    loadOrders();
+    void loadOrders(true);
+
+    const refreshTimer = window.setInterval(() => {
+      if (document.visibilityState === "visible") {
+        void loadOrders(false);
+      }
+    }, 2000);
+
+    const visibilityHandler = () => {
+      if (document.visibilityState === "visible") {
+        void loadOrders(false);
+      }
+    };
+
+    document.addEventListener(
+      "visibilitychange",
+      visibilityHandler
+    );
 
     const timer = window.setInterval(() => {
       setNow(Date.now());
     }, 1000);
 
     return () => {
+      window.clearInterval(refreshTimer);
       window.clearInterval(timer);
+      document.removeEventListener(
+        "visibilitychange",
+        visibilityHandler
+      );
     };
   }, []);
 
@@ -171,6 +159,12 @@ export default function ShopkeeperOrdersPage() {
           ?.toLowerCase()
           .includes(query) ||
         order.advance_transaction_id
+          ?.toLowerCase()
+          .includes(query) ||
+        order.student_name
+          ?.toLowerCase()
+          .includes(query) ||
+        order.student_phone
           ?.toLowerCase()
           .includes(query) ||
         order.remaining_transaction_id
@@ -245,25 +239,24 @@ export default function ShopkeeperOrdersPage() {
     setError("");
     setMessage("");
 
-    try {
-      await postAction("prepare", {
-        orderId: order.order_id,
-      });
+    const { error: rpcError } =
+      await supabase.rpc(
+        "prepare_instant_order",
+        {
+          p_order_id: order.order_id,
+        }
+      );
 
+    if (rpcError) {
+      setError(rpcError.message);
+    } else {
       setMessage(
         `Token ${order.token_code} এখন preparing status-এ আছে।`
       );
-
-      await loadOrders();
-    } catch (error) {
-      setError(
-        error instanceof Error
-          ? error.message
-          : "Unable to start preparing."
-      );
-    } finally {
-      setWorkingId(null);
+      await loadOrders(false);
     }
+
+    setWorkingId(null);
   }
 
   async function markReady(orderId: string) {
@@ -271,22 +264,23 @@ export default function ShopkeeperOrdersPage() {
     setError("");
     setMessage("");
 
-    try {
-      await postAction("ready", {
-        orderId,
-      });
-
-      setMessage("Order successfully marked as ready.");
-      await loadOrders();
-    } catch (error) {
-      setError(
-        error instanceof Error
-          ? error.message
-          : "Unable to mark order as ready."
+    const { error: rpcError } =
+      await supabase.rpc(
+        "update_shopkeeper_order_status",
+        {
+          p_order_id: orderId,
+          p_new_status: "ready",
+        }
       );
-    } finally {
-      setWorkingId(null);
+
+    if (rpcError) {
+      setError(rpcError.message);
+    } else {
+      setMessage("Order successfully marked as ready.");
+      await loadOrders(false);
     }
+
+    setWorkingId(null);
   }
 
   async function payRemaining(order: ShopkeeperOrder) {
@@ -329,13 +323,19 @@ export default function ShopkeeperOrdersPage() {
     setError("");
     setMessage("");
 
-    try {
-      await postAction("remaining", {
-        orderId: order.order_id,
-        paymentMethod: method,
-        transactionId: txId,
-      });
+    const { error: rpcError } =
+      await supabase.rpc(
+        "mark_remaining_payment_paid",
+        {
+          p_order_id: order.order_id,
+          p_payment_method: method,
+          p_transaction_id: txId,
+        }
+      );
 
+    if (rpcError) {
+      setError(rpcError.message);
+    } else {
       setMessage(
         `Token ${order.token_code}-এর remaining payment recorded.`
       );
@@ -350,16 +350,10 @@ export default function ShopkeeperOrdersPage() {
         [order.order_id]: "",
       }));
 
-      await loadOrders();
-    } catch (error) {
-      setError(
-        error instanceof Error
-          ? error.message
-          : "Unable to record remaining payment."
-      );
-    } finally {
-      setWorkingId(null);
+      await loadOrders(false);
     }
+
+    setWorkingId(null);
   }
 
   async function collectOrder(orderId: string) {
@@ -375,22 +369,22 @@ export default function ShopkeeperOrdersPage() {
     setError("");
     setMessage("");
 
-    try {
-      await postAction("collect", {
-        orderId,
-      });
-
-      setMessage("Order successfully collected.");
-      await loadOrders();
-    } catch (error) {
-      setError(
-        error instanceof Error
-          ? error.message
-          : "Unable to collect order."
+    const { error: rpcError } =
+      await supabase.rpc(
+        "collect_order",
+        {
+          p_order_id: orderId,
+        }
       );
-    } finally {
-      setWorkingId(null);
+
+    if (rpcError) {
+      setError(rpcError.message);
+    } else {
+      setMessage("Order successfully collected.");
+      await loadOrders(false);
     }
+
+    setWorkingId(null);
   }
 
   const confirmedCount = orders.filter(
@@ -428,10 +422,20 @@ export default function ShopkeeperOrdersPage() {
           <div className="flex gap-2">
             <button
               type="button"
-              onClick={() => void loadOrders()}
+              onClick={() => loadOrders(true)}
               className="rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
             >
               Refresh
+            </button>
+
+            <button
+              type="button"
+              onClick={() =>
+                (window.location.href = "/shopkeeper/orders/history")
+              }
+              className="rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
+            >
+              History
             </button>
 
             <button
@@ -487,7 +491,7 @@ export default function ShopkeeperOrdersPage() {
                 htmlFor="orderSearch"
                 className="mb-2 block text-sm font-bold text-slate-700"
               >
-                Search Order
+                Search Order / Customer
               </label>
 
               <input
@@ -497,7 +501,7 @@ export default function ShopkeeperOrdersPage() {
                 onChange={(event) =>
                   setSearch(event.target.value)
                 }
-                placeholder="Token code বা transaction ID"
+                placeholder="Token, student name, phone বা transaction ID"
                 className="w-full rounded-xl border border-slate-300 px-4 py-3 text-sm outline-none transition focus:border-emerald-500 focus:ring-4 focus:ring-emerald-100"
               />
             </div>
@@ -576,7 +580,7 @@ export default function ShopkeeperOrdersPage() {
                   key={order.order_id}
                   className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm"
                 >
-                  <div className="grid gap-4 md:grid-cols-5">
+                  <div className="grid gap-4 md:grid-cols-3 lg:grid-cols-6">
                     <div>
                       <p className="text-sm text-slate-500">
                         Token
@@ -584,6 +588,16 @@ export default function ShopkeeperOrdersPage() {
 
                       <p className="mt-1 text-xl font-black">
                         {order.token_code}
+                      </p>
+                    </div>
+
+                    <div>
+                      <p className="text-sm text-slate-500">
+                        Food
+                      </p>
+
+                      <p className="mt-1 font-bold text-slate-950">
+                        {order.food_names || "Not available"}
                       </p>
                     </div>
 
@@ -634,6 +648,26 @@ export default function ShopkeeperOrdersPage() {
                           order.remaining_due
                         ).toFixed(2)}
                       </p>
+                    </div>
+                  </div>
+
+                  <div className="mt-6 rounded-2xl border border-slate-200 bg-slate-50 p-5">
+                    <p className="text-sm font-bold uppercase tracking-wide text-slate-600">
+                      Student Information
+                    </p>
+                    <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                      <div>
+                        <p className="text-xs text-slate-500">Name</p>
+                        <p className="mt-1 font-bold text-slate-900">
+                          {order.student_name || "Not available"}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-slate-500">Phone</p>
+                        <p className="mt-1 font-bold text-slate-900">
+                          {order.student_phone || "Not available"}
+                        </p>
+                      </div>
                     </div>
                   </div>
 

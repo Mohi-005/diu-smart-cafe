@@ -7,7 +7,8 @@ export default function AdminShopsPage() {
   const router = useRouter();
 
   const [shopName, setShopName] = useState("");
-  const [logoUrl, setLogoUrl] = useState("");
+  const [logoFile, setLogoFile] = useState<File | null>(null);
+  const [logoPreview, setLogoPreview] = useState<string | null>(null);
   const [phoneNumber, setPhoneNumber] = useState("");
   const [bkashNumber, setBkashNumber] = useState("");
   const [email, setEmail] = useState("");
@@ -16,6 +17,36 @@ export default function AdminShopsPage() {
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
+
+  function handleLogoChange(file: File | null) {
+    setError("");
+
+    if (!file) {
+      setLogoFile(null);
+      if (logoPreview?.startsWith("blob:")) {
+        URL.revokeObjectURL(logoPreview);
+      }
+      setLogoPreview(null);
+      return;
+    }
+
+    if (!file.type.startsWith("image/")) {
+      setError("Please select a valid cafe logo image.");
+      return;
+    }
+
+    if (file.size > 5 * 1024 * 1024) {
+      setError("Cafe logo image size must be 5 MB or less.");
+      return;
+    }
+
+    if (logoPreview?.startsWith("blob:")) {
+      URL.revokeObjectURL(logoPreview);
+    }
+
+    setLogoFile(file);
+    setLogoPreview(URL.createObjectURL(file));
+  }
 
   async function handleSubmit(
     event: React.FormEvent<HTMLFormElement>
@@ -26,20 +57,24 @@ export default function AdminShopsPage() {
     setMessage("");
     setError("");
 
+    if (!logoFile) {
+      setError("Please select a cafe logo image before creating the shop.");
+      setLoading(false);
+      return;
+    }
+
     try {
+      const formData = new FormData();
+      formData.append("shopName", shopName.trim());
+      formData.append("phoneNumber", phoneNumber.trim());
+      formData.append("bkashNumber", bkashNumber.trim());
+      formData.append("email", email.trim());
+      formData.append("password", password);
+      formData.append("logo", logoFile);
+
       const response = await fetch("/api/admin/shops", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          shopName,
-          logoUrl,
-          phoneNumber,
-          bkashNumber,
-          email,
-          password,
-        }),
+        body: formData,
       });
 
       const data = await response.json();
@@ -55,11 +90,11 @@ export default function AdminShopsPage() {
       );
 
       setShopName("");
-      setLogoUrl("");
       setPhoneNumber("");
       setBkashNumber("");
       setEmail("");
       setPassword("");
+      handleLogoChange(null);
 
       router.refresh();
     } catch (err) {
@@ -208,29 +243,46 @@ export default function AdminShopsPage() {
                   />
                 </div>
 
-                {/* Logo */}
+                {/* Cafe Logo */}
                 <div className="md:col-span-2">
                   <label
-                    htmlFor="logoUrl"
+                    htmlFor="logo"
                     className="mb-2 block text-sm font-bold text-slate-700"
                   >
-                    Logo URL
+                    Cafe Logo Image
                   </label>
 
                   <input
-                    id="logoUrl"
-                    type="url"
-                    value={logoUrl}
+                    id="logo"
+                    type="file"
+                    accept="image/png,image/jpeg,image/webp"
                     onChange={(event) =>
-                      setLogoUrl(event.target.value)
+                      handleLogoChange(
+                        event.target.files?.[0] ?? null
+                      )
                     }
-                    placeholder="https://example.com/logo.png"
-                    className="w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm outline-none transition focus:border-emerald-500 focus:ring-4 focus:ring-emerald-100"
+                    required
+                    className="block w-full rounded-xl border border-slate-300 bg-white text-sm text-slate-500 file:mr-4 file:border-0 file:bg-slate-100 file:px-4 file:py-3 file:text-sm file:font-semibold file:text-slate-700"
                   />
 
                   <p className="mt-2 text-xs text-slate-400">
-                    Image URL দিলে shop logo হিসেবে ব্যবহার করা যাবে।
+                    JPG, PNG or WebP. Maximum 5 MB. এই ছবিটিই cafe logo হিসেবে system-এর বিভিন্ন জায়গায় দেখানো হবে।
                   </p>
+
+                  {logoPreview && (
+                    <div className="mt-4">
+                      <p className="mb-2 text-xs font-bold uppercase tracking-wider text-slate-500">
+                        Logo Preview
+                      </p>
+                      <div className="flex h-28 w-28 items-center justify-center overflow-hidden rounded-2xl border border-slate-200 bg-slate-50">
+                        <img
+                          src={logoPreview}
+                          alt="Cafe logo preview"
+                          className="h-full w-full object-contain p-2"
+                        />
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
             </section>

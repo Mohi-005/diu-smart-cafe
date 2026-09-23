@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 
 import { createClient } from "@/lib/supabase/client";
+import CartButton from "@/components/student/CartButton";
 
 const supabase = createClient();
 
@@ -329,6 +330,17 @@ export default function StudentPage() {
       )
     : 0;
 
+  /*
+   * Instant Order = full amount already paid.
+   *
+   * Instant orders must NEVER show or use
+   * the pre-order cancellation window.
+   */
+  const isInstantOrder =
+    currentOrder !== null &&
+    advancePaid >=
+      Number(currentOrder.total_amount) - 0.01;
+
   const historyOrders = orders.filter(
     (order) => order.id !== currentOrder?.id
   );
@@ -359,6 +371,7 @@ export default function StudentPage() {
 
   const cancellationAllowed =
     currentOrder &&
+    !isInstantOrder &&
     currentOrder.status !== "cancelled" &&
     currentOrder.status !== "collected" &&
     cancelSeconds > 0;
@@ -381,6 +394,8 @@ export default function StudentPage() {
           </div>
 
           <div className="flex items-center gap-2">
+            <CartButton />
+
             <button
               onClick={loadDashboard}
               className="rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
@@ -506,6 +521,7 @@ export default function StudentPage() {
             )}
 
             {currentOrder.status === "confirmed" &&
+              !isInstantOrder &&
               cancelSeconds <= 0 &&
               currentOrder.cancellation_deadline_at && (
                 <div className="mt-6 rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm font-bold text-emerald-700">
@@ -610,7 +626,9 @@ export default function StudentPage() {
                 id="student-order-search"
                 type="text"
                 value={searchTerm}
-                onChange={(event) => setSearchTerm(event.target.value)}
+                onChange={(event) =>
+                  setSearchTerm(event.target.value)
+                }
                 placeholder="Search by token, status, order ID or amount"
                 className="flex-1 rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm outline-none transition focus:border-emerald-500 focus:ring-4 focus:ring-emerald-100"
               />
@@ -629,7 +647,10 @@ export default function StudentPage() {
             {normalizedSearch && (
               <p className="mt-3 text-xs text-slate-500">
                 {filteredHistoryOrders.length} order
-                {filteredHistoryOrders.length === 1 ? "" : "s"} found.
+                {filteredHistoryOrders.length === 1
+                  ? ""
+                  : "s"}{" "}
+                found.
               </p>
             )}
           </div>
@@ -641,7 +662,7 @@ export default function StudentPage() {
               </h3>
 
               <p className="mt-2 text-sm text-slate-500">
-                Your completed orders will appear here.
+                Your completed or cancelled orders will appear here.
               </p>
             </div>
           ) : filteredHistoryOrders.length === 0 ? (

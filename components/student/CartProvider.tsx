@@ -42,6 +42,7 @@ const CartContext = createContext<CartContextType | undefined>(
 );
 
 const CART_STORAGE_KEY = "diu-smart-cafe-cart";
+const MAX_QUANTITY = 20;
 
 export function CartProvider({
   children,
@@ -59,7 +60,26 @@ export function CartProvider({
         const parsedCart = JSON.parse(savedCart);
 
         if (Array.isArray(parsedCart)) {
-          setItems(parsedCart);
+          const safeCart = parsedCart
+            .filter(
+              (item) =>
+                item &&
+                typeof item.id === "string" &&
+                typeof item.name === "string" &&
+                typeof item.price === "number" &&
+                typeof item.cafe_id === "string" &&
+                typeof item.cafe_name === "string"
+            )
+            .map((item) => ({
+              ...item,
+              price: Math.max(0, Number(item.price)),
+              quantity: Math.min(
+                MAX_QUANTITY,
+                Math.max(1, Number(item.quantity) || 1)
+              ),
+            }));
+
+          setItems(safeCart);
         }
       }
     } catch {
@@ -81,7 +101,16 @@ export function CartProvider({
   }, [items, isHydrated]);
 
   function addToCart(item: CartItem): AddToCartResult {
-    if (items.length > 0 && items[0].cafe_id !== item.cafe_id) {
+    /*
+     * One cart = one cafe.
+     *
+     * A customer can order from another cafe after
+     * completing/clearing the current cart.
+     */
+    if (
+      items.length > 0 &&
+      items[0].cafe_id !== item.cafe_id
+    ) {
       return {
         success: false,
         message:
@@ -89,6 +118,11 @@ export function CartProvider({
           `Please complete or clear that cart before ordering from ${item.cafe_name}.`,
       };
     }
+
+    const requestedQuantity = Math.min(
+      MAX_QUANTITY,
+      Math.max(1, Number(item.quantity) || 1)
+    );
 
     setItems((currentItems) => {
       const existingItem = currentItems.find(
@@ -100,7 +134,10 @@ export function CartProvider({
           cartItem.id === item.id
             ? {
                 ...cartItem,
-                quantity: cartItem.quantity + 1,
+                quantity: Math.min(
+                  MAX_QUANTITY,
+                  cartItem.quantity + requestedQuantity
+                ),
               }
             : cartItem
         );
@@ -110,13 +147,16 @@ export function CartProvider({
         ...currentItems,
         {
           ...item,
-          quantity: 1,
+          quantity: requestedQuantity,
         },
       ];
     });
 
     return {
       success: true,
+      message: `${requestedQuantity} item${
+        requestedQuantity > 1 ? "s" : ""
+      } added to cart.`,
     };
   }
 
@@ -126,7 +166,10 @@ export function CartProvider({
         item.id === id
           ? {
               ...item,
-              quantity: item.quantity + 1,
+              quantity: Math.min(
+                MAX_QUANTITY,
+                item.quantity + 1
+              ),
             }
           : item
       )

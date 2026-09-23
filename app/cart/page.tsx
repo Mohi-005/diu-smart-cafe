@@ -1,9 +1,74 @@
 "use client";
 
 import Link from "next/link";
+import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
+
 import { useCart } from "@/components/student/CartProvider";
+import { createClient } from "@/lib/supabase/client";
 
 export default function CartPage() {
+  const router = useRouter();
+
+  const [checkingAccess, setCheckingAccess] =
+    useState(true);
+
+  const [checkingCheckout, setCheckingCheckout] =
+    useState(false);
+
+  useEffect(() => {
+    let mounted = true;
+
+    async function checkAccess() {
+      const supabase = createClient();
+
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+
+      if (!user) {
+        if (mounted) {
+          setCheckingAccess(false);
+        }
+
+        return;
+      }
+
+      const { data: profile } = await supabase
+        .from("profiles")
+        .select("role, is_frozen")
+        .eq("id", user.id)
+        .maybeSingle();
+
+      if (!mounted) {
+        return;
+      }
+
+      if (profile?.role === "shopkeeper") {
+        router.replace("/shopkeeper");
+        return;
+      }
+
+      if (profile?.role === "admin") {
+        router.replace("/admin");
+        return;
+      }
+
+      if (profile?.role !== "student" || profile.is_frozen === true) {
+        router.replace("/login");
+        return;
+      }
+
+      setCheckingAccess(false);
+    }
+
+    checkAccess();
+
+    return () => {
+      mounted = false;
+    };
+  }, [router]);
+
   const {
     items,
     itemCount,
@@ -15,10 +80,65 @@ export default function CartPage() {
     clearCart,
   } = useCart();
 
+  async function handleContinueToCheckout() {
+    if (checkingCheckout) {
+      return;
+    }
+
+    setCheckingCheckout(true);
+
+    try {
+      const supabase = createClient();
+
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+
+      if (!user) {
+        router.push("/login?redirect=/checkout");
+        return;
+      }
+
+      const { data: profile } = await supabase
+        .from("profiles")
+        .select("role, is_frozen")
+        .eq("id", user.id)
+        .maybeSingle();
+
+      if (profile?.role === "shopkeeper") {
+        router.push("/shopkeeper");
+        return;
+      }
+
+      if (profile?.role === "admin") {
+        router.push("/admin");
+        return;
+      }
+
+      if (profile?.role !== "student" || profile.is_frozen === true) {
+        router.push("/login?redirect=/checkout");
+        return;
+      }
+
+      router.push("/checkout");
+    } finally {
+      setCheckingCheckout(false);
+    }
+  }
+
+  if (checkingAccess) {
+    return (
+      <main className="flex min-h-screen items-center justify-center bg-slate-50">
+        <p className="text-sm font-semibold text-slate-500">
+          Checking your account...
+        </p>
+      </main>
+    );
+  }
+
   if (items.length === 0) {
     return (
       <main className="min-h-screen bg-slate-50 text-slate-900">
-        {/* Header */}
         <header className="border-b border-slate-200 bg-white">
           <div className="mx-auto flex max-w-6xl items-center justify-between gap-4 px-5 py-4 lg:px-8">
             <Link href="/" className="shrink-0">
@@ -43,7 +163,6 @@ export default function CartPage() {
           </div>
         </header>
 
-        {/* Empty Cart */}
         <div className="mx-auto flex min-h-[70vh] max-w-2xl items-center justify-center px-5 py-12">
           <div className="w-full rounded-3xl border border-slate-200 bg-white p-8 text-center shadow-sm sm:p-10">
             <div className="mx-auto flex h-20 w-20 items-center justify-center rounded-2xl bg-slate-100 text-5xl">
@@ -59,8 +178,8 @@ export default function CartPage() {
             </h1>
 
             <p className="mx-auto mt-3 max-w-md text-sm leading-6 text-slate-500">
-              Browse the available cafe menus, choose your food and add
-              your favorite items to your cart.
+              Browse the available cafe menus, choose your food
+              and add your favorite items to your cart.
             </p>
 
             <Link
@@ -78,7 +197,6 @@ export default function CartPage() {
 
   return (
     <main className="min-h-screen bg-slate-50 text-slate-900">
-      {/* Header */}
       <header className="border-b border-slate-200 bg-white">
         <div className="mx-auto flex max-w-6xl items-center justify-between gap-4 px-5 py-4 lg:px-8">
           <Link href="/" className="shrink-0">
@@ -104,7 +222,6 @@ export default function CartPage() {
       </header>
 
       <div className="mx-auto max-w-6xl px-5 py-10 lg:px-8 lg:py-12">
-        {/* Page Heading */}
         <div className="flex flex-col gap-5 sm:flex-row sm:items-end sm:justify-between">
           <div>
             <span className="inline-flex rounded-full bg-emerald-50 px-3 py-1 text-xs font-bold uppercase tracking-wider text-emerald-700">
@@ -129,9 +246,7 @@ export default function CartPage() {
           </button>
         </div>
 
-        {/* Main Content */}
         <div className="mt-8 grid gap-8 lg:grid-cols-[1fr_360px]">
-          {/* Cart Items */}
           <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
             <div className="border-b border-slate-200 px-6 py-5">
               <div className="flex items-center justify-between gap-4">
@@ -158,7 +273,6 @@ export default function CartPage() {
                   key={item.id}
                   className="flex flex-col gap-5 p-6 sm:flex-row sm:items-center"
                 >
-                  {/* Image */}
                   <div className="h-24 w-24 shrink-0 overflow-hidden rounded-xl bg-slate-100">
                     {item.image_url ? (
                       <img
@@ -173,7 +287,6 @@ export default function CartPage() {
                     )}
                   </div>
 
-                  {/* Item Information */}
                   <div className="min-w-0 flex-1">
                     <h3 className="font-black text-slate-950">
                       {item.name}
@@ -183,12 +296,13 @@ export default function CartPage() {
                       ৳{item.price.toFixed(2)} each
                     </p>
 
-                    {/* Quantity Controls */}
                     <div className="mt-4 flex flex-wrap items-center gap-2">
                       <button
                         type="button"
                         aria-label={`Decrease quantity of ${item.name}`}
-                        onClick={() => decreaseQuantity(item.id)}
+                        onClick={() =>
+                          decreaseQuantity(item.id)
+                        }
                         className="flex h-9 w-9 items-center justify-center rounded-lg border border-slate-300 text-lg font-bold text-slate-700 transition hover:bg-slate-50"
                       >
                         −
@@ -201,30 +315,43 @@ export default function CartPage() {
                       <button
                         type="button"
                         aria-label={`Increase quantity of ${item.name}`}
-                        onClick={() => increaseQuantity(item.id)}
-                        className="flex h-9 w-9 items-center justify-center rounded-lg border border-slate-300 text-lg font-bold text-slate-700 transition hover:bg-slate-50"
+                        onClick={() =>
+                          increaseQuantity(item.id)
+                        }
+                        disabled={item.quantity >= 20}
+                        className="flex h-9 w-9 items-center justify-center rounded-lg border border-slate-300 text-lg font-bold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
                       >
                         +
                       </button>
 
                       <button
                         type="button"
-                        onClick={() => removeFromCart(item.id)}
+                        onClick={() =>
+                          removeFromCart(item.id)
+                        }
                         className="ml-1 rounded-lg px-2 py-2 text-xs font-bold text-red-600 transition hover:bg-red-50 hover:text-red-700 sm:ml-3"
                       >
                         Remove
                       </button>
                     </div>
+
+                    {item.quantity >= 20 && (
+                      <p className="mt-2 text-xs font-medium text-orange-600">
+                        Maximum quantity is 20.
+                      </p>
+                    )}
                   </div>
 
-                  {/* Item Subtotal */}
                   <div className="shrink-0 text-left sm:text-right">
                     <p className="text-xs font-medium text-slate-400">
                       Subtotal
                     </p>
 
                     <p className="mt-1 text-lg font-black text-slate-950">
-                      ৳{(item.price * item.quantity).toFixed(2)}
+                      ৳
+                      {(item.price * item.quantity).toFixed(
+                        2
+                      )}
                     </p>
                   </div>
                 </article>
@@ -232,7 +359,6 @@ export default function CartPage() {
             </div>
           </section>
 
-          {/* Order Summary */}
           <aside className="h-fit rounded-2xl border border-slate-200 bg-white p-6 shadow-sm lg:sticky lg:top-24">
             <h2 className="text-xl font-black text-slate-950">
               Order Summary
@@ -288,13 +414,17 @@ export default function CartPage() {
               </div>
             </div>
 
-            <Link
-              href="/checkout"
-              className="mt-7 flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-600 px-5 py-3.5 text-center text-sm font-bold text-white shadow-sm transition hover:bg-emerald-700"
+            <button
+              type="button"
+              onClick={handleContinueToCheckout}
+              disabled={checkingCheckout}
+              className="mt-7 flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-600 px-5 py-3.5 text-center text-sm font-bold text-white shadow-sm transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-60"
             >
-              Continue to Checkout
-              <span aria-hidden="true">→</span>
-            </Link>
+              {checkingCheckout ? "Checking account..." : "Continue to Checkout"}
+              {!checkingCheckout && (
+                <span aria-hidden="true">→</span>
+              )}
+            </button>
 
             <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-4">
               <p className="text-xs font-bold text-slate-700">

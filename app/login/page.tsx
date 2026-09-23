@@ -9,6 +9,18 @@ import {
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 
+function getSafeRedirectPath(value: string | null) {
+  if (!value) {
+    return "/student";
+  }
+
+  if (!value.startsWith("/") || value.startsWith("//") || value.includes("\\")) {
+    return "/student";
+  }
+
+  return value;
+}
+
 export default function LoginPage() {
   const router =
     useRouter();
@@ -33,7 +45,6 @@ export default function LoginPage() {
     setErrorMessage,
   ] = useState("");
 
-
   useEffect(() => {
     const params =
       new URLSearchParams(
@@ -42,7 +53,6 @@ export default function LoginPage() {
 
     const error =
       params.get("error");
-
 
     if (
       error ===
@@ -53,7 +63,6 @@ export default function LoginPage() {
       );
     }
 
-
     if (
       error ===
       "confirmation_failed"
@@ -62,7 +71,6 @@ export default function LoginPage() {
         "Email confirmation failed. Please try again or request a new confirmation email."
       );
     }
-
 
     if (error) {
       window.history.replaceState(
@@ -73,18 +81,20 @@ export default function LoginPage() {
     }
   }, []);
 
-
   async function handleLogin(
     event: FormEvent<HTMLFormElement>
   ) {
     event.preventDefault();
+
+    const redirectPath = getSafeRedirectPath(
+      new URLSearchParams(window.location.search).get("redirect")
+    );
 
     setLoading(true);
     setErrorMessage("");
 
     const supabase =
       createClient();
-
 
     /* ---------------------------------------------------
        Sign in
@@ -101,7 +111,6 @@ export default function LoginPage() {
         password,
       });
 
-
     if (error) {
       setErrorMessage(
         error.message
@@ -112,7 +121,6 @@ export default function LoginPage() {
       return;
     }
 
-
     if (!data.user) {
       setErrorMessage(
         "Login failed. User information was not returned."
@@ -122,7 +130,6 @@ export default function LoginPage() {
 
       return;
     }
-
 
     /* ---------------------------------------------------
        Profile
@@ -144,7 +151,6 @@ export default function LoginPage() {
         )
         .maybeSingle();
 
-
     if (profileError) {
       await supabase.auth.signOut();
 
@@ -157,7 +163,6 @@ export default function LoginPage() {
       return;
     }
 
-
     if (!profile) {
       await supabase.auth.signOut();
 
@@ -169,7 +174,6 @@ export default function LoginPage() {
 
       return;
     }
-
 
     /* ---------------------------------------------------
        Frozen student
@@ -191,7 +195,6 @@ export default function LoginPage() {
       return;
     }
 
-
     /* ---------------------------------------------------
        Role routing
     --------------------------------------------------- */
@@ -209,20 +212,18 @@ export default function LoginPage() {
       return;
     }
 
-
     if (
       profile.role ===
       "student"
     ) {
       router.push(
-        "/student"
+        redirectPath
       );
 
       router.refresh();
 
       return;
     }
-
 
     if (
       profile.role ===
@@ -237,7 +238,6 @@ export default function LoginPage() {
       return;
     }
 
-
     await supabase.auth.signOut();
 
     setErrorMessage(
@@ -246,7 +246,6 @@ export default function LoginPage() {
 
     setLoading(false);
   }
-
 
   return (
     <main className="flex min-h-screen items-center justify-center bg-slate-50 px-5 py-12">
@@ -267,7 +266,6 @@ export default function LoginPage() {
           </p>
         </div>
 
-
         <div className="rounded-3xl border border-slate-200 bg-white p-7 shadow-xl shadow-slate-200/50 sm:p-9">
           <div>
             <p className="text-sm font-bold uppercase tracking-wider text-emerald-600">
@@ -282,7 +280,6 @@ export default function LoginPage() {
               Enter your email and password to continue.
             </p>
           </div>
-
 
           <form
             onSubmit={
@@ -323,7 +320,6 @@ export default function LoginPage() {
               />
             </div>
 
-
             <div>
               <label
                 htmlFor="password"
@@ -357,13 +353,11 @@ export default function LoginPage() {
               />
             </div>
 
-
             {errorMessage && (
               <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm leading-6 text-red-700">
                 {errorMessage}
               </div>
             )}
-
 
             <button
               type="submit"
@@ -378,18 +372,16 @@ export default function LoginPage() {
             </button>
           </form>
 
-
           <div className="mt-6 text-center text-sm text-slate-500">
             Don&apos;t have a
             student account?{" "}
             <Link
-              href="/signup"
+              href="/signup?redirect=/cart"
               className="font-bold text-emerald-600 transition hover:text-emerald-700"
             >
               Create one
             </Link>
           </div>
-
 
           <div className="mt-4 text-center">
             <Link

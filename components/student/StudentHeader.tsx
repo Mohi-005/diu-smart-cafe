@@ -5,18 +5,25 @@ import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import CartButton from "./CartButton";
 
+type StudentRole = "student" | "shopkeeper" | "admin";
+
 type StudentHeaderProps = {
+  username?: string | null;
   fullName?: string | null;
   email?: string | null;
+  role?: StudentRole | null;
 };
 
 export default function StudentHeader({
+  username,
   fullName,
   email,
+  role = null,
 }: StudentHeaderProps) {
   const router = useRouter();
 
   const displayName =
+    username?.trim() ||
     fullName?.trim() ||
     email?.split("@")[0] ||
     "Student";
@@ -30,10 +37,11 @@ export default function StudentHeader({
     router.refresh();
   }
 
+  const isStudent = role === "student";
+
   return (
     <header className="sticky top-0 z-50 border-b border-slate-200 bg-white/95 backdrop-blur">
       <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-5 py-4 lg:px-8">
-        {/* Logo */}
         <Link href="/" className="shrink-0">
           <p className="text-xl font-black tracking-tight text-slate-950">
             DIU{" "}
@@ -47,7 +55,6 @@ export default function StudentHeader({
           </p>
         </Link>
 
-        {/* Navigation */}
         <nav className="hidden items-center gap-6 md:flex">
           <Link
             href="/cafes"
@@ -57,13 +64,13 @@ export default function StudentHeader({
           </Link>
 
           <Link
-            href="/cafes"
+            href="/menu"
             className="text-sm font-semibold text-slate-600 transition hover:text-emerald-600"
           >
             Menu
           </Link>
 
-          {email && (
+          {email && isStudent && (
             <Link
               href="/student"
               className="text-sm font-semibold text-slate-600 transition hover:text-emerald-600"
@@ -73,7 +80,6 @@ export default function StudentHeader({
           )}
         </nav>
 
-        {/* Right Side */}
         <div className="flex items-center gap-2 sm:gap-3">
           <CartButton />
 
@@ -81,15 +87,16 @@ export default function StudentHeader({
             <>
               <div className="hidden text-right lg:block">
                 <p className="text-xs font-semibold text-slate-950">
-                  {displayName}
+                  @{displayName}
                 </p>
 
-                <p className="max-w-40 truncate text-[11px] text-slate-400">
+                <p className="max-w-52 truncate text-[11px] text-slate-400">
                   {email}
                 </p>
               </div>
 
               <button
+                type="button"
                 onClick={handleLogout}
                 className="rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-xs font-bold text-slate-700 transition hover:bg-slate-50"
               >
